@@ -148,6 +148,14 @@ export class MultiResTileManager {
         continue;
       }
 
+      // Cacher les tuiles à l'arrière de la sphère (dot product caméra→tuile vs normale)
+      // Évite de voir le wireframe de l'autre côté
+      const dot = tile.center.dot(cameraPos);
+      if (dot < 0) {
+        if (tile.mesh) tile.mesh.visible = false;
+        continue;
+      }
+
       if (tile.mesh) tile.mesh.visible = true;
 
       const dist = cameraPos.distanceTo(tile.center);

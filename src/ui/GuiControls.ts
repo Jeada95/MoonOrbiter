@@ -34,49 +34,103 @@ export class GuiControls {
     this.gui = new GUI({ title: 'MoonOrbiter' });
 
     // --- Soleil ---
-    const params = {
+    const sunParams = {
       sunAngle: lighting.getSunAngleDegrees(),
       sunIntensity: lighting.sunLight.intensity,
-      ambientIntensity: lighting.ambientLight.intensity,
     };
 
     const sunFolder = this.gui.addFolder('Soleil');
     sunFolder
-      .add(params, 'sunAngle', 0, 360, 1)
+      .add(sunParams, 'sunAngle', 0, 360, 1)
       .name('Angle')
       .onChange((v: number) => lighting.setSunAngle(v));
     sunFolder
-      .add(params, 'sunIntensity', 0, 5, 0.1)
+      .add(sunParams, 'sunIntensity', 0, 5, 0.1)
       .name('Intensité')
       .onChange((v: number) => { lighting.sunLight.intensity = v; });
-    sunFolder
-      .add(params, 'ambientIntensity', 0, 1, 0.01)
-      .name('Lumière ambiante')
-      .onChange((v: number) => { lighting.ambientLight.intensity = v; });
     sunFolder.open();
 
-    // --- Terrain ---
-    const terrainParams = {
+    // --- Toggle Photo / Adaptatif (deux checkboxes inter-verrouillées, même ligne) ---
+    if (multiTile) {
+      const modeParams = { photo: true, adaptive: false };
+
+      const photoCtrl = this.gui
+        .add(modeParams, 'photo')
+        .name('Photo')
+        .onChange((v: boolean) => {
+          if (!v) {
+            // On ne peut pas tout décocher — forcer adaptatif
+            modeParams.adaptive = true;
+            adaptiveCtrl.updateDisplay();
+          } else {
+            modeParams.adaptive = false;
+            adaptiveCtrl.updateDisplay();
+          }
+          applyMode();
+        });
+
+      const adaptiveCtrl = this.gui
+        .add(modeParams, 'adaptive')
+        .name('Adaptatif')
+        .onChange((v: boolean) => {
+          if (!v) {
+            // On ne peut pas tout décocher — forcer photo
+            modeParams.photo = true;
+            photoCtrl.updateDisplay();
+          } else {
+            modeParams.photo = false;
+            photoCtrl.updateDisplay();
+          }
+          applyMode();
+        });
+
+      // Mettre les deux checkboxes sur la même ligne via CSS
+      const photoEl = photoCtrl.domElement.closest('.controller') as HTMLElement;
+      const adaptiveEl = adaptiveCtrl.domElement.closest('.controller') as HTMLElement;
+      if (photoEl && adaptiveEl) {
+        const wrapper = document.createElement('div');
+        wrapper.style.display = 'flex';
+        wrapper.style.width = '100%';
+        photoEl.style.flex = '1';
+        photoEl.style.borderBottom = 'none';
+        adaptiveEl.style.flex = '1';
+        photoEl.parentElement?.insertBefore(wrapper, photoEl);
+        wrapper.appendChild(photoEl);
+        wrapper.appendChild(adaptiveEl);
+      }
+
+      const applyMode = () => {
+        const isAdaptive = modeParams.adaptive;
+        multiTile.onToggleAdaptive(isAdaptive);
+        if (isAdaptive) {
+          photoFolder.hide();
+          adaptiveFolder?.show();
+          adaptiveFolder?.open();
+        } else {
+          adaptiveFolder?.hide();
+          photoFolder.show();
+          photoFolder.open();
+        }
+      };
+    }
+
+    // --- Folder Photo ---
+    const photoParams = {
       normalIntensity: globe.getNormalScale(),
-      wireframe: globe.getWireframe(),
     };
 
-    const terrainFolder = this.gui.addFolder('Terrain (photo)');
-    terrainFolder
-      .add(terrainParams, 'normalIntensity', 0, 5, 0.1)
+    const photoFolder = this.gui.addFolder('Photo');
+    photoFolder
+      .add(photoParams, 'normalIntensity', 0, 5, 0.1)
       .name('Relief (normales)')
       .onChange((v: number) => globe.setNormalScale(v));
-    terrainFolder
-      .add(terrainParams, 'wireframe')
-      .name('Maillage (fil de fer)')
-      .onChange((v: boolean) => globe.setWireframe(v));
-    terrainFolder.open();
+    photoFolder.open();
 
-    // --- Maillage adaptatif multi-tuiles ---
+    // --- Folder Adaptatif ---
+    let adaptiveFolder: GUI | null = null;
+
     if (multiTile) {
       const adaptiveParams = {
-        enabled: false,
-        // Slider discret 1..3 mappé sur les résolutions
         resolutionLevel: 1,
         exaggeration: DEFAULT_VERTICAL_EXAGGERATION,
         maxError: DEFAULT_MAX_ERROR,
@@ -84,13 +138,8 @@ export class GuiControls {
         stats: '0 tuiles | 0 △',
       };
 
-      const adaptiveFolder = this.gui.addFolder('Maillage adaptatif');
-      adaptiveFolder
-        .add(adaptiveParams, 'enabled')
-        .name('Mode adaptatif')
-        .onChange((v: boolean) => multiTile.onToggleAdaptive(v));
+      adaptiveFolder = this.gui.addFolder('Adaptatif');
 
-      // Slider 3 positions : 1 = basse, 2 = moyenne, 3 = haute
       adaptiveFolder
         .add(adaptiveParams, 'resolutionLevel', 1, GRID_RESOLUTIONS.length, 1)
         .name('Résolution')
@@ -100,7 +149,6 @@ export class GuiControls {
           resLabelCtrl.setValue(RES_LABELS[res] || String(res));
         });
 
-      // Label de résolution (lecture seule, affiche le détail)
       const resLabelObj = { label: RES_LABELS[GRID_RESOLUTIONS[0]] };
       const resLabelCtrl = adaptiveFolder
         .add(resLabelObj, 'label')
@@ -125,15 +173,14 @@ export class GuiControls {
         .name('Stats')
         .disable();
 
-      adaptiveFolder.open();
+      // Caché par défaut (on démarre en mode photo)
+      adaptiveFolder.hide();
 
-      // Mettre à jour les stats périodiquement
+      // Stats refresh
       setInterval(() => {
-        if (adaptiveParams.enabled) {
-          const stats = multiTile.getStats();
-          adaptiveParams.stats = `${stats.tiles} tuiles | ${(stats.triangles / 1000).toFixed(0)}K △`;
-          this.statsDisplay?.updateDisplay();
-        }
+        const stats = multiTile.getStats();
+        adaptiveParams.stats = `${stats.tiles} tuiles | ${(stats.triangles / 1000).toFixed(0)}K △`;
+        this.statsDisplay?.updateDisplay();
       }, 500);
     }
   }
