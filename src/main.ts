@@ -71,6 +71,14 @@ globe.loadLDEM('/moon-data/raw/LDEM_64.IMG', 23040, 11520, 0.5)
 const tileManager = new MultiResTileManager(moonScene.scene);
 let adaptiveMode = false;
 
+// Résolution → description pour le HUD
+const RES_HUD_INFO: Record<number, string> = {
+  513:  'LDEM 64ppd — ~889 m/px',
+  1025: 'LDEM 64ppd — ~444 m/px',
+  2049: 'LDEM 128ppd — ~222 m/px',
+};
+let currentAdaptiveRes = 513;
+
 // UI
 const hud = new HUD();
 const gui = new GuiControls(lighting, globe, {
@@ -78,10 +86,15 @@ const gui = new GuiControls(lighting, globe, {
     adaptiveMode = enabled;
     globe.setVisible(!enabled);
     tileManager.setVisible(enabled);
+    hud.setResolutionInfo(enabled ? RES_HUD_INFO[currentAdaptiveRes] : 'LDEM 64ppd — Globe');
     console.log(`Mode adaptatif: ${enabled ? 'ON' : 'OFF'}`);
   },
   onResolutionChange: (resolution) => {
+    currentAdaptiveRes = resolution;
     tileManager.setResolution(resolution);
+    if (adaptiveMode) {
+      hud.setResolutionInfo(RES_HUD_INFO[resolution] || `LDEM — ${resolution}px`);
+    }
     console.log(`Résolution: ${resolution}`);
   },
   onMaxErrorChange: (maxError: number) => {
