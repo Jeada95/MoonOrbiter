@@ -1,11 +1,18 @@
 import * as THREE from 'three';
 import { SPHERE_RADIUS, MOON_RADIUS } from '../utils/config';
 
+const KM_TO_MI = 0.621371;
+
 export class HUD {
   private elCoords: HTMLElement;
   private elAlt: HTMLElement;
   private elResolution: HTMLElement;
   private elFps: HTMLElement;
+
+  // Scale bar elements
+  private elScaleBar: HTMLElement;
+  private elScaleKm: HTMLElement;
+  private elScaleMi: HTMLElement;
 
   private frameCount = 0;
   private lastFpsTime = 0;
@@ -21,6 +28,10 @@ export class HUD {
     this.elAlt = document.getElementById('hud-alt')!;
     this.elResolution = document.getElementById('hud-resolution')!;
     this.elFps = document.getElementById('hud-fps')!;
+
+    this.elScaleBar = document.getElementById('scalebar-bar')!;
+    this.elScaleKm = document.getElementById('scalebar-km')!;
+    this.elScaleMi = document.getElementById('scalebar-mi')!;
 
     window.addEventListener('mousemove', this.onMouseMove);
   }
@@ -50,25 +61,23 @@ export class HUD {
     const altKm = ((camDist - SPHERE_RADIUS) / SPHERE_RADIUS) * MOON_RADIUS;
     this.elAlt.textContent = `Altitude: ${altKm.toFixed(0)} km`;
 
+    // Barre d'échelle
+    this.updateScaleBar(camera as THREE.PerspectiveCamera);
+
     // Coordonnées sous le curseur (raycast throttlé à 100ms pour les perfs)
     if (this.mouseDirty && time - this.lastRaycastTime > 100) {
       this.lastRaycastTime = time;
       this.mouseDirty = false;
 
       this.raycaster.setFromCamera(this.mouse, camera);
-      // Raycast sur toute la scène (globe + tuiles adaptatives)
       const intersects = this.raycaster.intersectObjects(sceneRoot.children, true);
 
       if (intersects.length > 0) {
-        // Le point est en coordonnées world. Le mesh est fixe à l'origine
-        // (OrbitControls déplace la caméra, pas le globe).
         const point = intersects[0].point;
         const r = point.length();
         const lat = Math.asin(point.y / r) * (180 / Math.PI);
-        // x = r cos(lat) cos(lon), z = r cos(lat) sin(lon) → lon = atan2(z, x)
         const lon = Math.atan2(point.z, point.x) * (180 / Math.PI);
 
-        // Normaliser lon en 0..360 puis afficher en -180..180
         const lonNorm = ((lon % 360) + 360) % 360;
         const lonDisplay = lonNorm > 180 ? lonNorm - 360 : lonNorm;
         const latDir = lat >= 0 ? 'N' : 'S';
@@ -81,7 +90,29 @@ export class HUD {
     }
   }
 
-  /** Met à jour la ligne d'info résolution */
+  /** Barre d'échelle fixe : calcule combien de km/mi représentent BAR_PX pixels. */
+  private updateScaleBar(camera: THREE.PerspectiveCamera): void {
+    const BAR_PX = 65;
+
+    const camDist = camera.position.length();
+    const fovRad = THREE.MathUtils.degToRad(camera.fov);
+    const surfaceDist = Math.max(camDist - SPHERE_RADIUS, 0.01);
+    const viewHeightAtSurface = 2 * surfaceDist * Math.tan(fovRad / 2);
+
+    const kmPerUnit = MOON_RADIUS / SPHERE_RADIUS;
+    const viewHeightKm = viewHeightAtSurface * kmPerUnit;
+    const kmPerPx = viewHeightKm / window.innerHeight;
+    const km = kmPerPx * BAR_PX;
+    const mi = km * KM_TO_MI;
+
+    // Formater avec une précision adaptée
+    const fmtKm = km >= 100 ? `${km.toFixed(0)} km` : km >= 10 ? `${km.toFixed(1)} km` : `${km.toFixed(2)} km`;
+    const fmtMi = mi >= 100 ? `${mi.toFixed(0)} mi` : mi >= 10 ? `${mi.toFixed(1)} mi` : `${mi.toFixed(2)} mi`;
+
+    this.elScaleKm.textContent = fmtKm;
+    this.elScaleMi.textContent = fmtMi;
+  }
+
   setResolutionInfo(text: string) {
     this.elResolution.textContent = text;
   }

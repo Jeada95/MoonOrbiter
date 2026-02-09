@@ -12,11 +12,11 @@
       position: absolute;
       bottom: 16px;
       left: 16px;
-      color: #ccc;
+      color: #ffffff;
       font-family: 'Consolas', 'Courier New', monospace;
       font-size: 13px;
       pointer-events: none;
-      text-shadow: 0 0 4px rgba(0,0,0,0.8);
+      text-shadow: 0 0 4px rgba(0,0,0,0.9);
       line-height: 1.6;
     }
     #title {
@@ -32,6 +32,34 @@
       pointer-events: none;
       opacity: 0.6;
     }
+    #scalebar {
+      position: absolute;
+      bottom: 16px;
+      right: 16px;
+      color: #ffffff;
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 11px;
+      pointer-events: none;
+      text-shadow: 0 0 4px rgba(0,0,0,0.9);
+      text-align: right;
+    }
+    #scalebar-labels {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 2px;
+    }
+    #scalebar-bar {
+      width: 65px;
+      height: 2px;
+      background: #ffffff;
+      border-left: 1px solid #ffffff;
+      border-right: 1px solid #ffffff;
+    }
+    #scalebar-ticks {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 1px;
+    }
   </style>
 </head>
 <body>
@@ -41,6 +69,15 @@
     <div id="hud-alt">Altitude: --</div>
     <div id="hud-resolution">LOLA 16ppd — 1.9 km/px</div>
     <div id="hud-fps">FPS: --</div>
+  </div>
+  <div id="scalebar">
+    <div id="scalebar-labels">
+      <span id="scalebar-km">-- km</span>
+    </div>
+    <div id="scalebar-bar"></div>
+    <div id="scalebar-ticks">
+      <span id="scalebar-mi">-- mi</span>
+    </div>
   </div>
   <script type="module" src="/src/main.ts"></script>
 </body>

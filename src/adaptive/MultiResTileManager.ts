@@ -166,7 +166,7 @@ export class MultiResTileManager {
 
       if (!tile.cachedGrid || tile.cachedGridResolution !== wantedRes) {
         needsLoad = !tile.loading;
-      } else if (!tile.mesh) {
+      } else if (!tile.cachedMartini || !tile.mesh) {
         needsRebuild = true;
       } else {
         const exagChanged = tile.activeExaggeration !== this.exaggeration;
@@ -191,7 +191,7 @@ export class MultiResTileManager {
       if (this.concurrentLoads >= MAX_CONCURRENT_LOADS) break;
 
       work.tile.targetResolution = wantedRes;
-      this.loadTileGrid(work.tile, wantedRes, work.wantedError);
+      this.loadTileGrid(work.tile, wantedRes);
       loadsBudget--;
     }
 
@@ -219,7 +219,7 @@ export class MultiResTileManager {
     this.totalTriangles = triangles;
   }
 
-  private async loadTileGrid(tile: ManagedTile, resolution: GridResolution, maxError: number): Promise<void> {
+  private async loadTileGrid(tile: ManagedTile, resolution: GridResolution): Promise<void> {
     tile.loading = true;
     this.concurrentLoads++;
 
@@ -227,13 +227,7 @@ export class MultiResTileManager {
       const grid = await this.gridLoader.loadGrid(tile.latMin, tile.lonMin, resolution);
       tile.cachedGrid = grid;
       tile.cachedGridResolution = resolution;
-
-      // Pré-calculer les erreurs Martini (phase lourde, une seule fois)
-      tile.cachedMartini = AdaptiveMesher.computeErrors(grid);
-
-      if (tile.targetResolution === resolution) {
-        this.buildTileMesh(tile, grid, maxError);
-      }
+      tile.cachedMartini = null; // Sera calculé dans le rebuild budget
     } catch (err) {
       console.warn(`Erreur chargement tuile ${tile.latMin},${tile.lonMin} @${resolution}:`, err);
     } finally {
@@ -245,14 +239,12 @@ export class MultiResTileManager {
   private buildTileMesh(tile: ManagedTile, grid: HeightmapGrid, maxError?: number): void {
     const tileMaxError = maxError ?? this.maxError;
 
-    // Utiliser les erreurs Martini cachées si disponibles (phase rapide seulement)
-    // Sinon fallback sur buildMesh complet (première fois)
-    let meshData;
-    if (tile.cachedMartini) {
-      meshData = AdaptiveMesher.extractMesh(grid, tile.cachedMartini, tileMaxError, this.exaggeration);
-    } else {
-      meshData = AdaptiveMesher.buildMesh(grid, tileMaxError, this.exaggeration);
+    // Calculer les erreurs Martini si pas encore cachées (phase lourde, une seule fois par grille)
+    if (!tile.cachedMartini) {
+      tile.cachedMartini = AdaptiveMesher.computeErrors(grid);
     }
+
+    const meshData = AdaptiveMesher.extractMesh(grid, tile.cachedMartini, tileMaxError, this.exaggeration);
 
     if (tile.mesh) {
       this.parent.remove(tile.mesh);
@@ -288,10 +280,8 @@ export class MultiResTileManager {
   setResolution(resolution: GridResolution): void {
     if (resolution === this.currentResolution) return;
     this.currentResolution = resolution;
-    // Invalider le cache Martini car il dépend de la grille (résolution différente)
-    for (const tile of this.tiles) {
-      tile.cachedMartini = null;
-    }
+    // Pas besoin d'invalider le cache : update() détecte cachedGridResolution !== wantedRes
+    // et recharge uniquement les tuiles visibles à la demande.
   }
 
   setMaxError(maxError: number): void {
