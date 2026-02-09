@@ -5,7 +5,6 @@ import {
   MIN_VERTICAL_EXAGGERATION,
   MAX_VERTICAL_EXAGGERATION,
   DEFAULT_VERTICAL_EXAGGERATION,
-  DEFAULT_MAX_ERROR,
   GRID_RESOLUTIONS,
 } from '../utils/config';
 import type { GridResolution } from '../adaptive/LocalGridLoader';
@@ -91,9 +90,12 @@ export class GuiControls {
         const wrapper = document.createElement('div');
         wrapper.style.display = 'flex';
         wrapper.style.width = '100%';
+        wrapper.style.gap = '0';
         photoEl.style.flex = '1';
         photoEl.style.borderBottom = 'none';
+        photoEl.style.paddingRight = '0';
         adaptiveEl.style.flex = '1';
+        adaptiveEl.style.paddingLeft = '0';
         photoEl.parentElement?.insertBefore(wrapper, photoEl);
         wrapper.appendChild(photoEl);
         wrapper.appendChild(adaptiveEl);
@@ -133,7 +135,6 @@ export class GuiControls {
       const adaptiveParams = {
         resolutionLevel: 1,
         exaggeration: DEFAULT_VERTICAL_EXAGGERATION,
-        maxError: DEFAULT_MAX_ERROR,
         wireframe: false,
         stats: '0 tuiles | 0 △',
       };
@@ -159,10 +160,6 @@ export class GuiControls {
         .add(adaptiveParams, 'exaggeration', MIN_VERTICAL_EXAGGERATION, MAX_VERTICAL_EXAGGERATION, 0.5)
         .name('Exagération (x)')
         .onChange((v: number) => multiTile.onExaggerationChange(v));
-      adaptiveFolder
-        .add(adaptiveParams, 'maxError', 5, 500, 5)
-        .name('Erreur max (m)')
-        .onChange((v: number) => multiTile.onMaxErrorChange(v));
       adaptiveFolder
         .add(adaptiveParams, 'wireframe')
         .name('Wireframe')
