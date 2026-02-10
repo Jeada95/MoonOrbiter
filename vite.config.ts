@@ -63,13 +63,31 @@ export default defineConfig({
             '.img': 'application/octet-stream', '.IMG': 'application/octet-stream',
           };
           import('fs').then(fs => {
-            if (fs.existsSync(filePath)) {
-              res.setHeader('Access-Control-Allow-Origin', '*');
-              const ext = path.extname(filePath).toLowerCase();
-              if (mimeTypes[ext]) res.setHeader('Content-Type', mimeTypes[ext]);
-              fs.createReadStream(filePath).pipe(res);
+            if (!fs.existsSync(filePath)) { next(); return; }
+
+            const ext = path.extname(filePath).toLowerCase();
+            const contentType = mimeTypes[ext] || 'application/octet-stream';
+            res.setHeader('Access-Control-Allow-Origin', '*');
+
+            // Support HTTP Range requests (needed for partial LDEM_128.IMG loading)
+            const rangeHeader = req.headers.range;
+            if (rangeHeader && rangeHeader.startsWith('bytes=')) {
+              const stat = fs.statSync(filePath);
+              const parts = rangeHeader.replace('bytes=', '').split('-');
+              const start = parseInt(parts[0], 10);
+              const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
+              const chunkSize = end - start + 1;
+
+              res.writeHead(206, {
+                'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+                'Accept-Ranges': 'bytes',
+                'Content-Length': chunkSize,
+                'Content-Type': contentType,
+              });
+              fs.createReadStream(filePath, { start, end }).pipe(res);
             } else {
-              next();
+              if (contentType) res.setHeader('Content-Type', contentType);
+              fs.createReadStream(filePath).pipe(res);
             }
           });
         });
