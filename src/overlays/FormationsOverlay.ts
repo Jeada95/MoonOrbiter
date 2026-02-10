@@ -71,20 +71,7 @@ function latLonToVec3(latDeg: number, lonDeg: number, r: number, out: THREE.Vect
 
 function makeWikiUrl(feature: LunarFeature): string {
   const encoded = feature.name.replace(/ /g, '_');
-  const t = feature.type;
-
-  if (t === 'Mare' || t === 'Oceanus')
-    return `https://en.wikipedia.org/wiki/${encoded}`;
-  if (t === 'Palus' || t === 'Lacus' || t === 'Sinus')
-    return `https://en.wikipedia.org/wiki/${encoded}`;
-  if (t === 'Mons' || t === 'Montes')
-    return `https://en.wikipedia.org/wiki/${encoded}`;
-  if (t === 'Vallis')
-    return `https://en.wikipedia.org/wiki/${encoded}`;
-  if (t === 'Rupes')
-    return `https://en.wikipedia.org/wiki/${encoded}`;
-  // Default: crater
-  return `https://en.wikipedia.org/wiki/${encoded}_(crater)`;
+  return `https://en.wikipedia.org/wiki/${encoded}`;
 }
 
 function classifyType(type: string): Category {
@@ -132,6 +119,15 @@ export class FormationsOverlay {
   private allMeta: FeatureMeta[] = [];
   /** World positions parallel to allFeatures */
   private allWorldPositions: THREE.Vector3[] = [];
+
+  /** Alphabetically sorted names (for search dropdown) */
+  private sortedNames: string[] = [];
+  /** Name → index in allFeatures */
+  private nameToIndex = new Map<string, number>();
+
+  /** Highlighted feature (search result) */
+  private highlightIndex = -1;
+  private highlightEl: HTMLDivElement | null = null;
 
   /** Per-category state */
   private cats: CategoryData[] = [];
@@ -212,6 +208,15 @@ export class FormationsOverlay {
       this.cats[c].indices = catIndices[c];
     }
 
+    // Build alphabetical name index for search
+    this.nameToIndex.clear();
+    for (let i = 0; i < this.allFeatures.length; i++) {
+      this.nameToIndex.set(this.allFeatures[i].name, i);
+    }
+    this.sortedNames = [...this.nameToIndex.keys()].sort((a, b) =>
+      a.localeCompare(b, 'en', { sensitivity: 'base' })
+    );
+
     console.log(
       `Loaded ${this.allFeatures.length} lunar features: ` +
       `${catIndices[0].length} maria, ${catIndices[1].length} craters, ${catIndices[2].length} other`
@@ -230,6 +235,7 @@ export class FormationsOverlay {
     } else {
       for (const cat of this.cats)
         for (const el of cat.pool) el.style.display = 'none';
+      if (this.highlightEl) this.highlightEl.style.display = 'none';
     }
   }
 
@@ -245,6 +251,52 @@ export class FormationsOverlay {
   setWikiMode(v: boolean): void {
     if (v === this.wikiMode) return;
     this.wikiMode = v;
+    this._dirty = true;
+  }
+
+  // ─── Search API ────────────────────────────────────────────
+
+  /** Get all feature names sorted alphabetically (for search dropdown) */
+  getAllFeatureNames(): string[] {
+    return this.sortedNames;
+  }
+
+  /** Get world position and diameter for a named feature (for camera navigation) */
+  getFeatureWorldPos(name: string): { worldPos: THREE.Vector3; diameter: number } | null {
+    const idx = this.nameToIndex.get(name);
+    if (idx === undefined) return null;
+    return {
+      worldPos: this.allWorldPositions[idx],
+      diameter: this.allFeatures[idx].diameter,
+    };
+  }
+
+  /** Highlight a named feature with a persistent special label. null = clear */
+  highlightFeature(name: string | null): void {
+    if (name === null) {
+      this.highlightIndex = -1;
+      if (this.highlightEl) {
+        this.highlightEl.style.display = 'none';
+      }
+      return;
+    }
+    const idx = this.nameToIndex.get(name);
+    if (idx === undefined) return;
+    this.highlightIndex = idx;
+
+    // Create highlight element on first use
+    if (!this.highlightEl) {
+      this.highlightEl = document.createElement('div');
+      this.highlightEl.style.cssText =
+        'position:absolute;pointer-events:none;display:none;' +
+        'color:#ffffff;font:bold 14px "Segoe UI",sans-serif;' +
+        'text-shadow:0 0 6px #000,0 0 12px #000;' +
+        'white-space:nowrap;transform:translate(-50%,-50%);' +
+        'background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.5);' +
+        'padding:2px 8px;border-radius:4px;';
+      this.labelContainer.appendChild(this.highlightEl);
+    }
+    this.highlightEl.textContent = '⟐ ' + this.allFeatures[idx].name;
     this._dirty = true;
   }
 
@@ -432,6 +484,22 @@ export class FormationsOverlay {
       for (let i = used; i < cat.pool.length; i++) {
         cat.pool[i].style.display = 'none';
         cat.poolFeatureIndex[i] = -1;
+      }
+    }
+
+    // Update highlight label
+    if (this.highlightEl && this.highlightIndex >= 0) {
+      const wp = this.allWorldPositions[this.highlightIndex];
+      tmp.copy(wp);
+      tmp.project(camera);
+      if (tmp.z <= 1 && wp.dot(cameraPos) > 0) {
+        const hx = (tmp.x * 0.5 + 0.5) * w;
+        const hy = (-tmp.y * 0.5 + 0.5) * h;
+        this.highlightEl.style.left = `${hx}px`;
+        this.highlightEl.style.top = `${hy}px`;
+        this.highlightEl.style.display = '';
+      } else {
+        this.highlightEl.style.display = 'none';
       }
     }
   }
