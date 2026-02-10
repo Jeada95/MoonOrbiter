@@ -123,8 +123,14 @@ const gui = new GuiControls(lighting, globe, {
   onToggleFormations: (enabled: boolean) => {
     formations.setVisible(enabled);
   },
-  onFormationsCountChange: (count: number) => {
-    formations.setCount(count);
+  onMariaCountChange: (count: number) => {
+    formations.setCategoryCount(0, count); // 0 = Maria
+  },
+  onCratersCountChange: (count: number) => {
+    formations.setCategoryCount(1, count); // 1 = Craters
+  },
+  onOtherCountChange: (count: number) => {
+    formations.setCategoryCount(2, count); // 2 = Other
   },
   onToggleWiki: (enabled: boolean) => {
     formations.setWikiMode(enabled);
