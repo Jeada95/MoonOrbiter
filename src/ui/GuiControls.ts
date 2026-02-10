@@ -24,7 +24,9 @@ export interface MultiTileCallbacks {
   onResolutionChange: (resolution: GridResolution) => void;
   onToggleGraticule: (enabled: boolean) => void;
   onToggleFormations: (enabled: boolean) => void;
-  onFormationsCountChange: (count: number) => void;
+  onMariaCountChange: (count: number) => void;
+  onCratersCountChange: (count: number) => void;
+  onOtherCountChange: (count: number) => void;
   onToggleWiki: (enabled: boolean) => void;
   getStats: () => { tiles: number; triangles: number };
 }
@@ -124,34 +126,52 @@ export class GuiControls {
         .name('Lat/lon grid')
         .onChange((v: boolean) => multiTile.onToggleGraticule(v));
 
-      // --- Formations checkbox + sub-controls ---
-      const formationsParams = { formations: false, count: 10, wiki: false };
+      // --- Formations checkbox + 3 category sliders + wiki ---
+      const formationsParams = {
+        formations: false,
+        maria: 10,
+        craters: 10,
+        other: 10,
+        wiki: false,
+      };
+
+      const subCtrls: ReturnType<GUI['add']>[] = [];
 
       this.gui
         .add(formationsParams, 'formations')
         .name('Formations')
         .onChange((v: boolean) => {
           multiTile.onToggleFormations(v);
-          if (v) {
-            countCtrl.show();
-            wikiCtrl.show();
-          } else {
-            countCtrl.hide();
-            wikiCtrl.hide();
-          }
+          for (const ctrl of subCtrls) v ? ctrl.show() : ctrl.hide();
         });
 
-      const countCtrl = this.gui
-        .add(formationsParams, 'count', 1, 50, 1)
-        .name('Top features')
-        .onChange((v: number) => multiTile.onFormationsCountChange(v));
-      countCtrl.hide();
+      const mariaCtrl = this.gui
+        .add(formationsParams, 'maria', 1, 20, 1)
+        .name('Maria')
+        .onChange((v: number) => multiTile.onMariaCountChange(v));
+      mariaCtrl.hide();
+      subCtrls.push(mariaCtrl);
+
+      const cratersCtrl = this.gui
+        .add(formationsParams, 'craters', 1, 50, 1)
+        .name('Craters')
+        .onChange((v: number) => multiTile.onCratersCountChange(v));
+      cratersCtrl.hide();
+      subCtrls.push(cratersCtrl);
+
+      const otherCtrl = this.gui
+        .add(formationsParams, 'other', 1, 50, 1)
+        .name('Other')
+        .onChange((v: number) => multiTile.onOtherCountChange(v));
+      otherCtrl.hide();
+      subCtrls.push(otherCtrl);
 
       const wikiCtrl = this.gui
         .add(formationsParams, 'wiki')
         .name('Wiki links')
         .onChange((v: boolean) => multiTile.onToggleWiki(v));
       wikiCtrl.hide();
+      subCtrls.push(wikiCtrl);
     }
 
     // --- Photo folder ---
