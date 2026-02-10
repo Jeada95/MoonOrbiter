@@ -259,6 +259,8 @@ export class MultiResTileManager {
     geometry.computeBoundingSphere();
 
     tile.mesh = new THREE.Mesh(geometry, this.material);
+    tile.mesh.castShadow = true;
+    tile.mesh.receiveShadow = true;
     this.parent.add(tile.mesh);
 
     tile.activeResolution = tile.cachedGridResolution;
