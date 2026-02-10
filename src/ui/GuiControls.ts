@@ -30,7 +30,6 @@ export interface MultiTileCallbacks {
   onToggleWiki: (enabled: boolean) => void;
   onSearchFeature: (name: string) => void;
   onClearSearch: () => void;
-  onSunModeChange: (astronomical: boolean) => void;
   onDateTimeChange: (date: Date) => void;
   onNowPressed: (date: Date) => void;
   onShadowsToggle: (enabled: boolean) => void;
@@ -43,199 +42,156 @@ export class GuiControls {
   private featureNames: string[] = [];
   private searchWrapper: HTMLDivElement | null = null;
 
-  constructor(lighting: Lighting, globe: Globe, multiTile?: MultiTileCallbacks) {
+  constructor(lighting: Lighting, globe: Globe, multiTile: MultiTileCallbacks) {
     this.gui = new GUI({ title: 'MoonOrbiter' });
+
+    // --- Datetime picker (top-level, always visible) ---
+    this.buildDateTimeWidget(this.gui, multiTile);
 
     // --- Sun ---
     const sunFolder = this.gui.addFolder('Sun');
 
-    if (multiTile) {
-      const sunParams = {
-        astronomical: true,
-        sunAngle: lighting.getSunAngleDegrees(),
-        sunIntensity: lighting.sunLight.intensity,
-        shadows: false,
-      };
+    const sunParams = {
+      sunIntensity: lighting.sunLight.intensity,
+      shadows: false,
+    };
 
-      // ─── Astronomical checkbox ───
-      const astroCtrl = sunFolder
-        .add(sunParams, 'astronomical')
-        .name('Astronomical')
-        .onChange((v: boolean) => {
-          multiTile.onSunModeChange(v);
-          if (v) {
-            angleCtrl.hide();
-            dtWrapper.style.display = '';
-          } else {
-            angleCtrl.show();
-            dtWrapper.style.display = 'none';
-          }
-        });
+    sunFolder
+      .add(sunParams, 'sunIntensity', 0, 5, 0.1)
+      .name('Intensity')
+      .onChange((v: number) => { lighting.sunLight.intensity = v; });
 
-      // ─── Datetime picker (custom DOM widget) ───
-      const dtWrapper = this.buildDateTimeWidget(sunFolder, multiTile);
+    sunFolder
+      .add(sunParams, 'shadows')
+      .name('Shadows')
+      .onChange((v: boolean) => multiTile.onShadowsToggle(v));
 
-      // ─── Angle slider (hidden by default — only visible in manual mode) ───
-      const angleCtrl = sunFolder
-        .add(sunParams, 'sunAngle', 0, 360, 1)
-        .name('Angle')
-        .onChange((v: number) => lighting.setSunAngle(v));
-      angleCtrl.hide(); // Start in astronomical mode
-
-      // ─── Intensity ───
-      sunFolder
-        .add(sunParams, 'sunIntensity', 0, 5, 0.1)
-        .name('Intensity')
-        .onChange((v: number) => { lighting.sunLight.intensity = v; });
-
-      // ─── Shadows checkbox ───
-      sunFolder
-        .add(sunParams, 'shadows')
-        .name('Shadows')
-        .onChange((v: boolean) => multiTile.onShadowsToggle(v));
-    } else {
-      // Fallback without multiTile: simple angle + intensity
-      const sunParams = {
-        sunAngle: lighting.getSunAngleDegrees(),
-        sunIntensity: lighting.sunLight.intensity,
-      };
-      sunFolder
-        .add(sunParams, 'sunAngle', 0, 360, 1)
-        .name('Angle')
-        .onChange((v: number) => lighting.setSunAngle(v));
-      sunFolder
-        .add(sunParams, 'sunIntensity', 0, 5, 0.1)
-        .name('Intensity')
-        .onChange((v: number) => { lighting.sunLight.intensity = v; });
-    }
     sunFolder.open();
 
     // --- Toggle Photo / Adaptive (two interlocked checkboxes on the same line) ---
-    if (multiTile) {
-      const modeParams = { photo: true, adaptive: false };
+    const modeParams = { photo: true, adaptive: false };
 
-      const photoCtrl = this.gui
-        .add(modeParams, 'photo')
-        .name('Photo')
-        .onChange((v: boolean) => {
-          if (!v) {
-            modeParams.adaptive = true;
-            adaptiveCtrl.updateDisplay();
-          } else {
-            modeParams.adaptive = false;
-            adaptiveCtrl.updateDisplay();
-          }
-          applyMode();
-        });
-
-      const adaptiveCtrl = this.gui
-        .add(modeParams, 'adaptive')
-        .name('Adaptive')
-        .onChange((v: boolean) => {
-          if (!v) {
-            modeParams.photo = true;
-            photoCtrl.updateDisplay();
-          } else {
-            modeParams.photo = false;
-            photoCtrl.updateDisplay();
-          }
-          applyMode();
-        });
-
-      // Place both checkboxes on the same line via CSS
-      const photoEl = photoCtrl.domElement.closest('.controller') as HTMLElement;
-      const adaptiveEl = adaptiveCtrl.domElement.closest('.controller') as HTMLElement;
-      if (photoEl && adaptiveEl) {
-        const wrapper = document.createElement('div');
-        wrapper.style.display = 'flex';
-        wrapper.style.width = '100%';
-        wrapper.style.gap = '0';
-        photoEl.style.flex = '1';
-        photoEl.style.borderBottom = 'none';
-        photoEl.style.paddingRight = '0';
-        adaptiveEl.style.flex = '1';
-        adaptiveEl.style.paddingLeft = '0';
-        photoEl.parentElement?.insertBefore(wrapper, photoEl);
-        wrapper.appendChild(photoEl);
-        wrapper.appendChild(adaptiveEl);
-      }
-
-      const applyMode = () => {
-        const isAdaptive = modeParams.adaptive;
-        multiTile.onToggleAdaptive(isAdaptive);
-        if (isAdaptive) {
-          photoFolder.hide();
-          adaptiveFolder?.show();
-          adaptiveFolder?.open();
+    const photoCtrl = this.gui
+      .add(modeParams, 'photo')
+      .name('Photo')
+      .onChange((v: boolean) => {
+        if (!v) {
+          modeParams.adaptive = true;
+          adaptiveCtrl.updateDisplay();
         } else {
-          adaptiveFolder?.hide();
-          photoFolder.show();
-          photoFolder.open();
+          modeParams.adaptive = false;
+          adaptiveCtrl.updateDisplay();
         }
-      };
+        applyMode();
+      });
 
-      // --- Lat/lon grid checkbox ---
-      const overlayParams = { grille: false };
-      this.gui
-        .add(overlayParams, 'grille')
-        .name('Lat/lon grid')
-        .onChange((v: boolean) => multiTile.onToggleGraticule(v));
+    const adaptiveCtrl = this.gui
+      .add(modeParams, 'adaptive')
+      .name('Adaptive')
+      .onChange((v: boolean) => {
+        if (!v) {
+          modeParams.photo = true;
+          photoCtrl.updateDisplay();
+        } else {
+          modeParams.photo = false;
+          photoCtrl.updateDisplay();
+        }
+        applyMode();
+      });
 
-      // --- Formations checkbox + 3 category sliders + wiki ---
-      const formationsParams = {
-        formations: false,
-        maria: 10,
-        craters: 10,
-        other: 10,
-        wiki: false,
-      };
-
-      const subCtrls: ReturnType<GUI['add']>[] = [];
-
-      this.gui
-        .add(formationsParams, 'formations')
-        .name('Formations')
-        .onChange((v: boolean) => {
-          multiTile.onToggleFormations(v);
-          for (const ctrl of subCtrls) v ? ctrl.show() : ctrl.hide();
-          if (this.searchWrapper) this.searchWrapper.style.display = v ? '' : 'none';
-        });
-
-      const mariaCtrl = this.gui
-        .add(formationsParams, 'maria', 1, 20, 1)
-        .name('Maria')
-        .onChange((v: number) => multiTile.onMariaCountChange(v));
-      mariaCtrl.hide();
-      subCtrls.push(mariaCtrl);
-
-      const cratersCtrl = this.gui
-        .add(formationsParams, 'craters', 1, 50, 1)
-        .name('Craters')
-        .onChange((v: number) => multiTile.onCratersCountChange(v));
-      cratersCtrl.hide();
-      subCtrls.push(cratersCtrl);
-
-      const otherCtrl = this.gui
-        .add(formationsParams, 'other', 1, 50, 1)
-        .name('Other')
-        .onChange((v: number) => multiTile.onOtherCountChange(v));
-      otherCtrl.hide();
-      subCtrls.push(otherCtrl);
-
-      const wikiCtrl = this.gui
-        .add(formationsParams, 'wiki')
-        .name('Wiki links')
-        .onChange((v: boolean) => multiTile.onToggleWiki(v));
-      wikiCtrl.hide();
-      subCtrls.push(wikiCtrl);
-
-      // --- Search dropdown (custom DOM widget) ---
-      this.searchWrapper = this.buildSearchWidget(multiTile);
-      // Insert into the lil-gui children list (after wikiCtrl)
-      const guiChildren = this.gui.domElement.querySelector('.children') as HTMLElement;
-      if (guiChildren) guiChildren.appendChild(this.searchWrapper);
-      this.searchWrapper.style.display = 'none'; // hidden by default (Formations off)
+    // Place both checkboxes on the same line via CSS
+    const photoEl = photoCtrl.domElement.closest('.controller') as HTMLElement;
+    const adaptiveEl = adaptiveCtrl.domElement.closest('.controller') as HTMLElement;
+    if (photoEl && adaptiveEl) {
+      const modeWrapper = document.createElement('div');
+      modeWrapper.style.display = 'flex';
+      modeWrapper.style.width = '100%';
+      modeWrapper.style.gap = '0';
+      photoEl.style.flex = '1';
+      photoEl.style.borderBottom = 'none';
+      photoEl.style.paddingRight = '0';
+      adaptiveEl.style.flex = '1';
+      adaptiveEl.style.paddingLeft = '0';
+      photoEl.parentElement?.insertBefore(modeWrapper, photoEl);
+      modeWrapper.appendChild(photoEl);
+      modeWrapper.appendChild(adaptiveEl);
     }
+
+    const applyMode = () => {
+      const isAdaptive = modeParams.adaptive;
+      multiTile.onToggleAdaptive(isAdaptive);
+      if (isAdaptive) {
+        photoFolder.hide();
+        adaptiveFolder.show();
+        adaptiveFolder.open();
+      } else {
+        adaptiveFolder.hide();
+        photoFolder.show();
+        photoFolder.open();
+      }
+    };
+
+    // --- Lat/lon grid checkbox ---
+    const overlayParams = { grille: false };
+    this.gui
+      .add(overlayParams, 'grille')
+      .name('Lat/lon grid')
+      .onChange((v: boolean) => multiTile.onToggleGraticule(v));
+
+    // --- Formations checkbox + 3 category sliders + wiki ---
+    const formationsParams = {
+      formations: false,
+      maria: 10,
+      craters: 10,
+      other: 10,
+      wiki: false,
+    };
+
+    const subCtrls: ReturnType<GUI['add']>[] = [];
+
+    this.gui
+      .add(formationsParams, 'formations')
+      .name('Formations')
+      .onChange((v: boolean) => {
+        multiTile.onToggleFormations(v);
+        for (const ctrl of subCtrls) v ? ctrl.show() : ctrl.hide();
+        if (this.searchWrapper) this.searchWrapper.style.display = v ? '' : 'none';
+      });
+
+    const mariaCtrl = this.gui
+      .add(formationsParams, 'maria', 1, 20, 1)
+      .name('Maria')
+      .onChange((v: number) => multiTile.onMariaCountChange(v));
+    mariaCtrl.hide();
+    subCtrls.push(mariaCtrl);
+
+    const cratersCtrl = this.gui
+      .add(formationsParams, 'craters', 1, 50, 1)
+      .name('Craters')
+      .onChange((v: number) => multiTile.onCratersCountChange(v));
+    cratersCtrl.hide();
+    subCtrls.push(cratersCtrl);
+
+    const otherCtrl = this.gui
+      .add(formationsParams, 'other', 1, 50, 1)
+      .name('Other')
+      .onChange((v: number) => multiTile.onOtherCountChange(v));
+    otherCtrl.hide();
+    subCtrls.push(otherCtrl);
+
+    const wikiCtrl = this.gui
+      .add(formationsParams, 'wiki')
+      .name('Wiki links')
+      .onChange((v: boolean) => multiTile.onToggleWiki(v));
+    wikiCtrl.hide();
+    subCtrls.push(wikiCtrl);
+
+    // --- Search dropdown (custom DOM widget) ---
+    this.searchWrapper = this.buildSearchWidget(multiTile);
+    // Insert into the lil-gui children list (after wikiCtrl)
+    const guiChildren = this.gui.domElement.querySelector('.children') as HTMLElement;
+    if (guiChildren) guiChildren.appendChild(this.searchWrapper);
+    this.searchWrapper.style.display = 'none'; // hidden by default (Formations off)
 
     // --- Photo folder ---
     const photoParams = {
@@ -250,57 +206,53 @@ export class GuiControls {
     photoFolder.open();
 
     // --- Adaptive folder ---
-    let adaptiveFolder: GUI | null = null;
+    const adaptiveParams = {
+      resolutionLevel: 1,
+      exaggeration: DEFAULT_VERTICAL_EXAGGERATION,
+      wireframe: false,
+      stats: '0 tiles | 0 △',
+    };
 
-    if (multiTile) {
-      const adaptiveParams = {
-        resolutionLevel: 1,
-        exaggeration: DEFAULT_VERTICAL_EXAGGERATION,
-        wireframe: false,
-        stats: '0 tiles | 0 △',
-      };
+    const adaptiveFolder = this.gui.addFolder('Adaptive');
 
-      adaptiveFolder = this.gui.addFolder('Adaptive');
+    adaptiveFolder
+      .add(adaptiveParams, 'resolutionLevel', 1, GRID_RESOLUTIONS.length, 1)
+      .name('Resolution')
+      .onChange((v: number) => {
+        const res = GRID_RESOLUTIONS[v - 1] as GridResolution;
+        multiTile.onResolutionChange(res);
+        resLabelCtrl.setValue(RES_LABELS[res] || String(res));
+      });
 
-      adaptiveFolder
-        .add(adaptiveParams, 'resolutionLevel', 1, GRID_RESOLUTIONS.length, 1)
-        .name('Resolution')
-        .onChange((v: number) => {
-          const res = GRID_RESOLUTIONS[v - 1] as GridResolution;
-          multiTile.onResolutionChange(res);
-          resLabelCtrl.setValue(RES_LABELS[res] || String(res));
-        });
+    const resLabelObj = { label: RES_LABELS[GRID_RESOLUTIONS[0]] };
+    const resLabelCtrl = adaptiveFolder
+      .add(resLabelObj, 'label')
+      .name('Detail')
+      .disable();
 
-      const resLabelObj = { label: RES_LABELS[GRID_RESOLUTIONS[0]] };
-      const resLabelCtrl = adaptiveFolder
-        .add(resLabelObj, 'label')
-        .name('Detail')
-        .disable();
+    adaptiveFolder
+      .add(adaptiveParams, 'exaggeration', MIN_VERTICAL_EXAGGERATION, MAX_VERTICAL_EXAGGERATION, 0.5)
+      .name('Exaggeration (x)')
+      .onChange((v: number) => multiTile.onExaggerationChange(v));
+    adaptiveFolder
+      .add(adaptiveParams, 'wireframe')
+      .name('Wireframe')
+      .onChange((v: boolean) => multiTile.onWireframeChange(v));
 
-      adaptiveFolder
-        .add(adaptiveParams, 'exaggeration', MIN_VERTICAL_EXAGGERATION, MAX_VERTICAL_EXAGGERATION, 0.5)
-        .name('Exaggeration (x)')
-        .onChange((v: number) => multiTile.onExaggerationChange(v));
-      adaptiveFolder
-        .add(adaptiveParams, 'wireframe')
-        .name('Wireframe')
-        .onChange((v: boolean) => multiTile.onWireframeChange(v));
+    this.statsDisplay = adaptiveFolder
+      .add(adaptiveParams, 'stats')
+      .name('Stats')
+      .disable();
 
-      this.statsDisplay = adaptiveFolder
-        .add(adaptiveParams, 'stats')
-        .name('Stats')
-        .disable();
+    // Hidden by default (start in Photo mode)
+    adaptiveFolder.hide();
 
-      // Hidden by default (start in Photo mode)
-      adaptiveFolder.hide();
-
-      // Stats refresh
-      setInterval(() => {
-        const stats = multiTile.getStats();
-        adaptiveParams.stats = `${stats.tiles} tiles | ${(stats.triangles / 1000).toFixed(0)}K △`;
-        this.statsDisplay?.updateDisplay();
-      }, 500);
-    }
+    // Stats refresh
+    setInterval(() => {
+      const stats = multiTile.getStats();
+      adaptiveParams.stats = `${stats.tiles} tiles | ${(stats.triangles / 1000).toFixed(0)}K △`;
+      this.statsDisplay?.updateDisplay();
+    }, 500);
   }
 
   /** Called once features are loaded to populate the search dropdown */
@@ -308,8 +260,8 @@ export class GuiControls {
     this.featureNames = names;
   }
 
-  /** Build a datetime-local + "Now" button widget injected into the Sun folder */
-  private buildDateTimeWidget(sunFolder: GUI, multiTile: MultiTileCallbacks): HTMLDivElement {
+  /** Build a datetime-local + "Now" button widget injected into a GUI container */
+  private buildDateTimeWidget(container: GUI, multiTile: MultiTileCallbacks): HTMLDivElement {
     const wrapper = document.createElement('div');
     wrapper.style.cssText =
       'padding:0 8px 4px 8px;display:flex;align-items:center;gap:4px;';
@@ -361,9 +313,9 @@ export class GuiControls {
     wrapper.appendChild(label);
     wrapper.appendChild(inputWrap);
 
-    // Insert into the Sun folder's children container
-    const folderChildren = sunFolder.domElement.querySelector('.children') as HTMLElement;
-    if (folderChildren) folderChildren.appendChild(wrapper);
+    // Insert into the container's children
+    const containerChildren = container.domElement.querySelector('.children') as HTMLElement;
+    if (containerChildren) containerChildren.appendChild(wrapper);
 
     return wrapper;
   }

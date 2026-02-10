@@ -66,6 +66,13 @@ export class GraticuleOverlay {
   private latLabels: { el: HTMLDivElement; lat: number }[] = [];
   private lonLabels: { el: HTMLDivElement; lon: number }[] = [];
 
+  // Reusable objects (avoid per-frame allocations)
+  private _tmpVec = new THREE.Vector3();
+  private _lonVisible: { el: HTMLDivElement; x: number; y: number }[] = [];
+  private _lastCamX = NaN;
+  private _lastCamY = NaN;
+  private _lastCamZ = NaN;
+
   constructor(private parent: THREE.Object3D) {
     this.group.visible = false;
     this.parent.add(this.group);
@@ -169,9 +176,9 @@ export class GraticuleOverlay {
       const el = document.createElement('div');
       el.textContent = text;
       el.style.cssText =
-        `position:absolute;color:${LAT_COLOR_CSS};font:10px Consolas,monospace;` +
+        `position:absolute;left:0;top:0;color:${LAT_COLOR_CSS};font:10px Consolas,monospace;` +
         'text-shadow:0 0 3px #000,0 0 6px #000;white-space:nowrap;opacity:0.85;' +
-        'transform:translate(-50%,2px);';
+        'will-change:transform;';
       this.labelContainer.appendChild(el);
       this.latLabels.push({ el, lat });
     }
@@ -184,9 +191,9 @@ export class GraticuleOverlay {
       const el = document.createElement('div');
       el.textContent = text;
       el.style.cssText =
-        `position:absolute;color:${LON_COLOR_CSS};font:10px Consolas,monospace;` +
+        `position:absolute;left:0;top:0;color:${LON_COLOR_CSS};font:10px Consolas,monospace;` +
         'text-shadow:0 0 3px #000,0 0 6px #000;white-space:nowrap;opacity:0.85;' +
-        'transform:translate(-50%,-100%);';
+        'will-change:transform;';
       this.labelContainer.appendChild(el);
       this.lonLabels.push({ el, lon });
     }
@@ -274,21 +281,32 @@ export class GraticuleOverlay {
   update(camera: THREE.Camera): void {
     if (!this.visible) return;
 
+    const cameraPos = camera.position;
+
+    // Dirty check: skip if camera hasn't moved
+    if (cameraPos.x === this._lastCamX &&
+        cameraPos.y === this._lastCamY &&
+        cameraPos.z === this._lastCamZ) {
+      return;
+    }
+    this._lastCamX = cameraPos.x;
+    this._lastCamY = cameraPos.y;
+    this._lastCamZ = cameraPos.z;
+
     // Choisir les pas adaptatifs
     const latStep = this.chooseLatStep(camera);
     const lonStep = this.chooseLonStep(camera);
 
     // Parallèle pour le positionnement des labels lon
-    const camLat = Math.asin(camera.position.y / camera.position.length()) * RAD2DEG;
+    const camLat = Math.asin(cameraPos.y / cameraPos.length()) * RAD2DEG;
     const labelLat = Math.max(-80, Math.min(80, camLat));
 
     this.rebuild(latStep, lonStep);
 
     const r = SPHERE_RADIUS * SURFACE_OFFSET;
-    const cameraPos = camera.position;
     const w = window.innerWidth;
     const h = window.innerHeight;
-    const tmp = new THREE.Vector3();
+    const tmp = this._tmpVec;
 
     // Méridien central pour placer les labels lat (snap sur lonStep)
     const camLon = Math.atan2(cameraPos.z, cameraPos.x) * RAD2DEG;
@@ -313,13 +331,13 @@ export class GraticuleOverlay {
       }
 
       el.style.display = '';
-      el.style.left = `${x}px`;
-      el.style.top = `${y}px`;
+      el.style.transform = `translate(calc(${x}px - 50%), calc(${y}px + 2px))`;
     }
 
     // --- Labels de longitude : sur le parallèle central, AU-DESSUS de la ligne ---
     // 1) Projeter tous les labels et collecter ceux qui sont visibles (face + écran)
-    const lonVisible: { el: HTMLDivElement; x: number; y: number }[] = [];
+    const lonVisible = this._lonVisible;
+    lonVisible.length = 0;
     for (const { el, lon } of this.lonLabels) {
       latLonToVec3(labelLat, lon, r, tmp);
 
@@ -384,8 +402,7 @@ export class GraticuleOverlay {
     // 5) Afficher les labels restants
     for (const { el, x, y } of lonVisible) {
       el.style.display = '';
-      el.style.left = `${x}px`;
-      el.style.top = `${y}px`;
+      el.style.transform = `translate(calc(${x}px - 50%), calc(${y}px - 100%))`;
     }
   }
 
@@ -393,6 +410,9 @@ export class GraticuleOverlay {
     this.visible = v;
     this.group.visible = v;
     this.labelContainer.style.display = v ? '' : 'none';
+
+    // Invalidate dirty check so next update() rebuilds labels
+    if (v) this._lastCamX = NaN;
 
     if (!v) {
       for (const { el } of this.latLabels) el.style.display = 'none';

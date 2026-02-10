@@ -61,6 +61,16 @@ export class MultiResTileManager {
   private lastUpdateTime = 0;
   private concurrentLoads = 0;
 
+  // Pre-allocated objects to avoid per-frame GC pressure
+  private _tmpSphere = new THREE.Sphere();
+  private _visibleWork: {
+    tile: ManagedTile;
+    dist: number;
+    wantedError: number;
+    needsLoad: boolean;
+    needsRebuild: boolean;
+  }[] = [];
+
   /** Résolution choisie par l'utilisateur (défaut = basse) */
   private currentResolution: GridResolution = 513;
 
@@ -128,20 +138,15 @@ export class MultiResTileManager {
     const wantedRes = this.currentResolution;
 
     // --- Phase 1 : calculer distance + visibilité, cacher les tuiles hors frustum ---
-    interface TileWork {
-      tile: ManagedTile;
-      dist: number;
-      wantedError: number;
-      needsLoad: boolean;
-      needsRebuild: boolean;
-    }
-    const visibleWork: TileWork[] = [];
+    const visibleWork = this._visibleWork;
+    visibleWork.length = 0;
+    const tileRadius = SPHERE_RADIUS * 0.15;
+    const tmpSphere = this._tmpSphere;
+    tmpSphere.radius = tileRadius;
 
     for (const tile of this.tiles) {
-      const tileRadius = SPHERE_RADIUS * 0.15;
-      const visible = this.frustum.intersectsSphere(
-        new THREE.Sphere(tile.center, tileRadius),
-      );
+      tmpSphere.center.copy(tile.center);
+      const visible = this.frustum.intersectsSphere(tmpSphere);
 
       if (!visible) {
         if (tile.mesh) tile.mesh.visible = false;

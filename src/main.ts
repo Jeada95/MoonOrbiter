@@ -93,7 +93,6 @@ formations.loadData('/moon-data/lunar_features.json')
   .catch((err) => console.warn('Failed to load lunar features:', err));
 
 // --- Sun + Earth-view: astronomical positioning at startup ---
-let sunMode: 'manual' | 'astronomical' = 'astronomical';
 let currentDateTime = new Date();
 const initialSun = computeSunPosition(currentDateTime);
 lighting.setSunDirection(initialSun.direction);
@@ -185,26 +184,13 @@ const gui = new GuiControls(lighting, globe, {
   onClearSearch: () => {
     formations.highlightFeature(null);
   },
-  onSunModeChange: (astronomical: boolean) => {
-    sunMode = astronomical ? 'astronomical' : 'manual';
-    if (astronomical) {
-      applySunPosition(currentDateTime);
-    } else {
-      hud.clearSunInfo();
-    }
-    console.log(`Sun mode: ${sunMode}`);
-  },
   onDateTimeChange: (date: Date) => {
     currentDateTime = date;
-    if (sunMode === 'astronomical') {
-      applySunPosition(date);
-    }
+    applySunPosition(date);
   },
   onNowPressed: (date: Date) => {
     currentDateTime = date;
-    if (sunMode === 'astronomical') {
-      applySunPosition(date);
-    }
+    applySunPosition(date);
     // Reset camera to Earth-view for current time
     const earthView = computeEarthViewPosition(date);
     moonScene.camera.position.copy(earthView.direction).multiplyScalar(SPHERE_RADIUS * 3.5);
@@ -239,8 +225,8 @@ function animate(time: number) {
   moonScene.controls.rotateSpeed = 0.4 * speedFactor;
   moonScene.controls.panSpeed = 0.4 * speedFactor;
 
-  // HUD update (raycast for coordinates, scale bar, FPS)
-  hud.update(moonScene.camera, moonScene.scene, time);
+  // HUD update (raycast only against the globe mesh, not the entire scene)
+  hud.update(moonScene.camera, [globe.mesh], time);
 
   // Graticule labels
   graticule.update(moonScene.camera);
