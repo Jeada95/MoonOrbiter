@@ -28,12 +28,16 @@ export interface MultiTileCallbacks {
   onCratersCountChange: (count: number) => void;
   onOtherCountChange: (count: number) => void;
   onToggleWiki: (enabled: boolean) => void;
+  onSearchFeature: (name: string) => void;
+  onClearSearch: () => void;
   getStats: () => { tiles: number; triangles: number };
 }
 
 export class GuiControls {
   private gui: GUI;
   private statsDisplay: any = null;
+  private featureNames: string[] = [];
+  private searchWrapper: HTMLDivElement | null = null;
 
   constructor(lighting: Lighting, globe: Globe, multiTile?: MultiTileCallbacks) {
     this.gui = new GUI({ title: 'MoonOrbiter' });
@@ -143,6 +147,7 @@ export class GuiControls {
         .onChange((v: boolean) => {
           multiTile.onToggleFormations(v);
           for (const ctrl of subCtrls) v ? ctrl.show() : ctrl.hide();
+          if (this.searchWrapper) this.searchWrapper.style.display = v ? '' : 'none';
         });
 
       const mariaCtrl = this.gui
@@ -172,6 +177,13 @@ export class GuiControls {
         .onChange((v: boolean) => multiTile.onToggleWiki(v));
       wikiCtrl.hide();
       subCtrls.push(wikiCtrl);
+
+      // --- Search dropdown (custom DOM widget) ---
+      this.searchWrapper = this.buildSearchWidget(multiTile);
+      // Insert into the lil-gui children list (after wikiCtrl)
+      const guiChildren = this.gui.domElement.querySelector('.children') as HTMLElement;
+      if (guiChildren) guiChildren.appendChild(this.searchWrapper);
+      this.searchWrapper.style.display = 'none'; // hidden by default (Formations off)
     }
 
     // --- Photo folder ---
@@ -238,6 +250,138 @@ export class GuiControls {
         this.statsDisplay?.updateDisplay();
       }, 500);
     }
+  }
+
+  /** Called once features are loaded to populate the search dropdown */
+  setFeatureNames(names: string[]): void {
+    this.featureNames = names;
+  }
+
+  private buildSearchWidget(multiTile: MultiTileCallbacks): HTMLDivElement {
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText =
+      'position:relative;padding:0 8px 6px 8px;display:flex;align-items:center;';
+
+    const label = document.createElement('span');
+    label.textContent = 'Search';
+    label.style.cssText =
+      'flex-shrink:0;width:40%;color:#b8b8b8;font:11px "Segoe UI",sans-serif;';
+
+    // ─── Toggle button (looks like a select) ─────────────────
+    const toggleWrap = document.createElement('div');
+    toggleWrap.style.cssText = 'position:relative;flex:1;min-width:0;';
+
+    const toggle = document.createElement('div');
+    toggle.textContent = 'Select ▾';
+    toggle.style.cssText =
+      'width:100%;box-sizing:border-box;padding:4px 6px;padding-right:18px;' +
+      'background:#1a1a2e;color:#999;border:1px solid #444;border-radius:3px;' +
+      'font:11px "Segoe UI",sans-serif;cursor:pointer;' +
+      'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+
+    // ─── Clear button (×) ────────────────────────────────────
+    const clearBtn = document.createElement('span');
+    clearBtn.textContent = '×';
+    clearBtn.style.cssText =
+      'position:absolute;right:3px;top:3px;color:#888;cursor:pointer;' +
+      'font:bold 13px sans-serif;line-height:1;display:none;z-index:1;';
+
+    // ─── Dropdown panel (search input + scrollable list) ─────
+    const panel = document.createElement('div');
+    panel.style.cssText =
+      'position:absolute;left:0;right:0;top:100%;' +
+      'background:#1a1a2e;border:1px solid #444;border-radius:0 0 3px 3px;' +
+      'z-index:1000;display:none;';
+
+    const searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.placeholder = 'Filter...';
+    searchInput.style.cssText =
+      'width:100%;box-sizing:border-box;padding:4px 6px;' +
+      'background:#111;color:#ddd;border:none;border-bottom:1px solid #444;' +
+      'font:12px "Segoe UI",sans-serif;outline:none;';
+
+    const listDiv = document.createElement('div');
+    listDiv.style.cssText = 'max-height:220px;overflow-y:auto;';
+
+    panel.appendChild(searchInput);
+    panel.appendChild(listDiv);
+    toggleWrap.appendChild(toggle);
+    toggleWrap.appendChild(clearBtn);
+    toggleWrap.appendChild(panel);
+    wrapper.appendChild(label);
+    wrapper.appendChild(toggleWrap);
+
+    let isOpen = false;
+
+    const buildItems = (filter: string) => {
+      listDiv.innerHTML = '';
+      const lc = filter.toLowerCase();
+      const matches = lc
+        ? this.featureNames.filter(n => n.toLowerCase().includes(lc))
+        : this.featureNames;
+
+      for (const name of matches) {
+        const item = document.createElement('div');
+        item.textContent = name;
+        item.style.cssText =
+          'padding:3px 6px;cursor:pointer;color:#ddd;font:12px "Segoe UI",sans-serif;' +
+          'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+        item.addEventListener('mouseenter', () => { item.style.background = '#333'; });
+        item.addEventListener('mouseleave', () => { item.style.background = ''; });
+        item.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          // Select this feature
+          toggle.textContent = name + ' ▾';
+          toggle.style.color = '#ddd';
+          clearBtn.style.display = '';
+          closePanel();
+          multiTile.onSearchFeature(name);
+        });
+        listDiv.appendChild(item);
+      }
+    };
+
+    const openPanel = () => {
+      isOpen = true;
+      panel.style.display = '';
+      searchInput.value = '';
+      buildItems('');
+      searchInput.focus();
+    };
+
+    const closePanel = () => {
+      isOpen = false;
+      panel.style.display = 'none';
+    };
+
+    toggle.addEventListener('click', () => {
+      if (isOpen) closePanel(); else openPanel();
+    });
+
+    clearBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggle.textContent = 'Select ▾';
+      toggle.style.color = '#999';
+      clearBtn.style.display = 'none';
+      closePanel();
+      multiTile.onClearSearch();
+    });
+
+    searchInput.addEventListener('input', () => {
+      buildItems(searchInput.value.trim());
+    });
+
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closePanel();
+    });
+
+    // Close when clicking outside
+    document.addEventListener('mousedown', (e) => {
+      if (isOpen && !toggleWrap.contains(e.target as Node)) closePanel();
+    });
+
+    return wrapper;
   }
 
   dispose() {

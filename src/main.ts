@@ -7,6 +7,7 @@ import { GuiControls } from './ui/GuiControls';
 import { MultiResTileManager } from './adaptive/MultiResTileManager';
 import { GraticuleOverlay } from './overlays/GraticuleOverlay';
 import { FormationsOverlay } from './overlays/FormationsOverlay';
+import { SPHERE_RADIUS } from './utils/config';
 
 // --- Initialization ---
 const moonScene = new MoonScene();
@@ -79,7 +80,10 @@ const graticule = new GraticuleOverlay(moonScene.scene);
 // --- Lunar formations ---
 const formations = new FormationsOverlay();
 formations.loadData('/moon-data/lunar_features.json')
-  .then(() => console.log('Lunar features loaded'))
+  .then(() => {
+    console.log('Lunar features loaded');
+    gui.setFeatureNames(formations.getAllFeatureNames());
+  })
   .catch((err) => console.warn('Failed to load lunar features:', err));
 
 // Resolution → HUD description
@@ -134,6 +138,29 @@ const gui = new GuiControls(lighting, globe, {
   },
   onToggleWiki: (enabled: boolean) => {
     formations.setWikiMode(enabled);
+  },
+  onSearchFeature: (name: string) => {
+    const result = formations.getFeatureWorldPos(name);
+    if (!result) return;
+    const { worldPos, diameter } = result;
+
+    // Keep target at origin so OrbitControls zoom (minDistance) works normally
+    moonScene.controls.target.set(0, 0, 0);
+
+    // Camera distance from center, proportional to diameter
+    // Small craters (30km) → tight zoom, large maria (1000km+) → wide view
+    const distFactor = Math.max(1.15, diameter / 200);
+    const camDist = SPHERE_RADIUS * distFactor;
+
+    // Position camera along the formation→outward vector
+    const dir = worldPos.clone().normalize();
+    moonScene.camera.position.copy(dir.multiplyScalar(camDist));
+
+    // Highlight the formation
+    formations.highlightFeature(name);
+  },
+  onClearSearch: () => {
+    formations.highlightFeature(null);
   },
   getStats: () => ({
     tiles: tileManager.renderedTileCount,
