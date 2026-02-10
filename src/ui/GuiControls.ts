@@ -9,11 +9,11 @@ import {
 } from '../utils/config';
 import type { GridResolution } from '../adaptive/LocalGridLoader';
 
-/** Labels affichés pour chaque résolution */
+/** Labels for each resolution level */
 const RES_LABELS: Record<number, string> = {
-  513: '1 — Basse (~889 m/px)',
-  1025: '2 — Moyenne (~444 m/px)',
-  2049: '3 — Haute (~222 m/px)',
+  513: '1 — Low (~889 m/px)',
+  1025: '2 — Medium (~444 m/px)',
+  2049: '3 — High (~222 m/px)',
 };
 
 export interface MultiTileCallbacks {
@@ -23,6 +23,9 @@ export interface MultiTileCallbacks {
   onWireframeChange: (enabled: boolean) => void;
   onResolutionChange: (resolution: GridResolution) => void;
   onToggleGraticule: (enabled: boolean) => void;
+  onToggleFormations: (enabled: boolean) => void;
+  onFormationsCountChange: (count: number) => void;
+  onToggleWiki: (enabled: boolean) => void;
   getStats: () => { tiles: number; triangles: number };
 }
 
@@ -33,24 +36,24 @@ export class GuiControls {
   constructor(lighting: Lighting, globe: Globe, multiTile?: MultiTileCallbacks) {
     this.gui = new GUI({ title: 'MoonOrbiter' });
 
-    // --- Soleil ---
+    // --- Sun ---
     const sunParams = {
       sunAngle: lighting.getSunAngleDegrees(),
       sunIntensity: lighting.sunLight.intensity,
     };
 
-    const sunFolder = this.gui.addFolder('Soleil');
+    const sunFolder = this.gui.addFolder('Sun');
     sunFolder
       .add(sunParams, 'sunAngle', 0, 360, 1)
       .name('Angle')
       .onChange((v: number) => lighting.setSunAngle(v));
     sunFolder
       .add(sunParams, 'sunIntensity', 0, 5, 0.1)
-      .name('Intensité')
+      .name('Intensity')
       .onChange((v: number) => { lighting.sunLight.intensity = v; });
     sunFolder.open();
 
-    // --- Toggle Photo / Adaptatif (deux checkboxes inter-verrouillées, même ligne) ---
+    // --- Toggle Photo / Adaptive (two interlocked checkboxes on the same line) ---
     if (multiTile) {
       const modeParams = { photo: true, adaptive: false };
 
@@ -59,7 +62,6 @@ export class GuiControls {
         .name('Photo')
         .onChange((v: boolean) => {
           if (!v) {
-            // On ne peut pas tout décocher — forcer adaptatif
             modeParams.adaptive = true;
             adaptiveCtrl.updateDisplay();
           } else {
@@ -71,10 +73,9 @@ export class GuiControls {
 
       const adaptiveCtrl = this.gui
         .add(modeParams, 'adaptive')
-        .name('Adaptatif')
+        .name('Adaptive')
         .onChange((v: boolean) => {
           if (!v) {
-            // On ne peut pas tout décocher — forcer photo
             modeParams.photo = true;
             photoCtrl.updateDisplay();
           } else {
@@ -84,7 +85,7 @@ export class GuiControls {
           applyMode();
         });
 
-      // Mettre les deux checkboxes sur la même ligne via CSS
+      // Place both checkboxes on the same line via CSS
       const photoEl = photoCtrl.domElement.closest('.controller') as HTMLElement;
       const adaptiveEl = adaptiveCtrl.domElement.closest('.controller') as HTMLElement;
       if (photoEl && adaptiveEl) {
@@ -116,15 +117,44 @@ export class GuiControls {
         }
       };
 
-      // --- Checkbox Grille lat/lon ---
+      // --- Lat/lon grid checkbox ---
       const overlayParams = { grille: false };
       this.gui
         .add(overlayParams, 'grille')
-        .name('Grille lat/lon')
+        .name('Lat/lon grid')
         .onChange((v: boolean) => multiTile.onToggleGraticule(v));
+
+      // --- Formations checkbox + sub-controls ---
+      const formationsParams = { formations: false, count: 10, wiki: false };
+
+      this.gui
+        .add(formationsParams, 'formations')
+        .name('Formations')
+        .onChange((v: boolean) => {
+          multiTile.onToggleFormations(v);
+          if (v) {
+            countCtrl.show();
+            wikiCtrl.show();
+          } else {
+            countCtrl.hide();
+            wikiCtrl.hide();
+          }
+        });
+
+      const countCtrl = this.gui
+        .add(formationsParams, 'count', 1, 50, 1)
+        .name('Top features')
+        .onChange((v: number) => multiTile.onFormationsCountChange(v));
+      countCtrl.hide();
+
+      const wikiCtrl = this.gui
+        .add(formationsParams, 'wiki')
+        .name('Wiki links')
+        .onChange((v: boolean) => multiTile.onToggleWiki(v));
+      wikiCtrl.hide();
     }
 
-    // --- Folder Photo ---
+    // --- Photo folder ---
     const photoParams = {
       normalIntensity: globe.getNormalScale(),
     };
@@ -132,11 +162,11 @@ export class GuiControls {
     const photoFolder = this.gui.addFolder('Photo');
     photoFolder
       .add(photoParams, 'normalIntensity', 0, 5, 0.1)
-      .name('Relief (normales)')
+      .name('Relief (normals)')
       .onChange((v: number) => globe.setNormalScale(v));
     photoFolder.open();
 
-    // --- Folder Adaptatif ---
+    // --- Adaptive folder ---
     let adaptiveFolder: GUI | null = null;
 
     if (multiTile) {
@@ -144,14 +174,14 @@ export class GuiControls {
         resolutionLevel: 1,
         exaggeration: DEFAULT_VERTICAL_EXAGGERATION,
         wireframe: false,
-        stats: '0 tuiles | 0 △',
+        stats: '0 tiles | 0 △',
       };
 
-      adaptiveFolder = this.gui.addFolder('Adaptatif');
+      adaptiveFolder = this.gui.addFolder('Adaptive');
 
       adaptiveFolder
         .add(adaptiveParams, 'resolutionLevel', 1, GRID_RESOLUTIONS.length, 1)
-        .name('Résolution')
+        .name('Resolution')
         .onChange((v: number) => {
           const res = GRID_RESOLUTIONS[v - 1] as GridResolution;
           multiTile.onResolutionChange(res);
@@ -161,12 +191,12 @@ export class GuiControls {
       const resLabelObj = { label: RES_LABELS[GRID_RESOLUTIONS[0]] };
       const resLabelCtrl = adaptiveFolder
         .add(resLabelObj, 'label')
-        .name('Détail')
+        .name('Detail')
         .disable();
 
       adaptiveFolder
         .add(adaptiveParams, 'exaggeration', MIN_VERTICAL_EXAGGERATION, MAX_VERTICAL_EXAGGERATION, 0.5)
-        .name('Exagération (x)')
+        .name('Exaggeration (x)')
         .onChange((v: number) => multiTile.onExaggerationChange(v));
       adaptiveFolder
         .add(adaptiveParams, 'wireframe')
@@ -178,13 +208,13 @@ export class GuiControls {
         .name('Stats')
         .disable();
 
-      // Caché par défaut (on démarre en mode photo)
+      // Hidden by default (start in Photo mode)
       adaptiveFolder.hide();
 
       // Stats refresh
       setInterval(() => {
         const stats = multiTile.getStats();
-        adaptiveParams.stats = `${stats.tiles} tuiles | ${(stats.triangles / 1000).toFixed(0)}K △`;
+        adaptiveParams.stats = `${stats.tiles} tiles | ${(stats.triangles / 1000).toFixed(0)}K △`;
         this.statsDisplay?.updateDisplay();
       }, 500);
     }
