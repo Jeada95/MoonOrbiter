@@ -9,12 +9,13 @@ interface LunarFeature {
   lon: number;   // degrees, -180 to +180
   diameter: number; // km
   type: string;  // "Crater", "Mare", "Mons", etc.
+  id: number;    // USGS Gazetteer feature ID
 }
 
 interface FeatureMeta {
   category: Category;
-  wikiEligible: boolean;
-  wikiUrl: string;
+  linkEligible: boolean;
+  infoUrl: string;
 }
 
 /** Three display categories, each with its own slider, color and pool */
@@ -32,8 +33,8 @@ const MARIA_TYPES = new Set(['Mare', 'Oceanus', 'Palus', 'Lacus', 'Sinus']);
 /** Feature types classified as Craters */
 const CRATER_TYPES = new Set(['Crater']);
 
-/** Minimum diameter (km) for Wikipedia link eligibility */
-const WIKI_MIN_DIAMETER = 25;
+/** Minimum diameter (km) for info link eligibility */
+const LINK_MIN_DIAMETER = 1;
 
 /** Style per category: [color, font, textShadow, opacity, charWidth, halfHeight] */
 const CAT_STYLES: Record<Category, {
@@ -69,9 +70,8 @@ function latLonToVec3(latDeg: number, lonDeg: number, r: number, out: THREE.Vect
   );
 }
 
-function makeWikiUrl(feature: LunarFeature): string {
-  const encoded = feature.name.replace(/ /g, '_');
-  return `https://en.wikipedia.org/wiki/${encoded}`;
+function makeInfoUrl(feature: LunarFeature): string {
+  return `https://planetarynames.wr.usgs.gov/Feature/${feature.id}`;
 }
 
 function classifyType(type: string): Category {
@@ -91,8 +91,8 @@ interface CategoryData {
   pool: HTMLDivElement[];
   /** Cache: feature index assigned to each pool slot (-1 = none) */
   poolFeatureIndex: number[];
-  /** Cache: wiki state when slot was last styled */
-  poolWikiState: boolean[];
+  /** Cache: link state when slot was last styled */
+  poolLinkState: boolean[];
 }
 
 // ─── FormationsOverlay ───────────────────────────────────────────
@@ -111,7 +111,7 @@ interface CategoryData {
 export class FormationsOverlay {
   private labelContainer: HTMLDivElement;
   private visible = false;
-  private wikiMode = false;
+  private linkMode = false;
 
   /** All features from JSON */
   private allFeatures: LunarFeature[] = [];
@@ -138,9 +138,9 @@ export class FormationsOverlay {
   private placedHW = new Float64Array(120);
   private placedHH = new Float64Array(120);
 
-  // ─── Optim: stable wiki click handler ──
-  private readonly _onWikiClick = (e: MouseEvent) => {
-    const url = (e.currentTarget as HTMLDivElement).dataset.wikiUrl;
+  // ─── Optim: stable link click handler ──
+  private readonly _onLinkClick = (e: MouseEvent) => {
+    const url = (e.currentTarget as HTMLDivElement).dataset.infoUrl;
     if (url) window.open(url, '_blank');
   };
 
@@ -167,7 +167,7 @@ export class FormationsOverlay {
         maxVisible: c === Category.Maria ? 10 : 10,
         pool: [],
         poolFeatureIndex: [],
-        poolWikiState: [],
+        poolLinkState: [],
       });
     }
   }
@@ -195,8 +195,8 @@ export class FormationsOverlay {
       const cat = classifyType(f.type);
       this.allMeta.push({
         category: cat,
-        wikiEligible: f.diameter >= WIKI_MIN_DIAMETER,
-        wikiUrl: makeWikiUrl(f),
+        linkEligible: f.diameter >= LINK_MIN_DIAMETER,
+        infoUrl: makeInfoUrl(f),
       });
 
       catIndices[cat].push(i);
@@ -248,9 +248,9 @@ export class FormationsOverlay {
     this._dirty = true;
   }
 
-  setWikiMode(v: boolean): void {
-    if (v === this.wikiMode) return;
-    this.wikiMode = v;
+  setLinkMode(v: boolean): void {
+    if (v === this.linkMode) return;
+    this.linkMode = v;
     this._dirty = true;
   }
 
@@ -269,6 +269,14 @@ export class FormationsOverlay {
       worldPos: this.allWorldPositions[idx],
       diameter: this.allFeatures[idx].diameter,
     };
+  }
+
+  /** Get geographic info for a named feature (for workshop extraction) */
+  getFeatureInfo(name: string): { lat: number; lon: number; diameter: number; type: string; name: string } | null {
+    const idx = this.nameToIndex.get(name);
+    if (idx === undefined) return null;
+    const f = this.allFeatures[idx];
+    return { lat: f.lat, lon: f.lon, diameter: f.diameter, type: f.type, name: f.name };
   }
 
   /** Highlight a named feature with a persistent special label. null = clear */
@@ -325,7 +333,7 @@ export class FormationsOverlay {
     }
 
     cat.poolFeatureIndex = new Array(target).fill(-1);
-    cat.poolWikiState = new Array(target).fill(false);
+    cat.poolLinkState = new Array(target).fill(false);
     this.resizePlacedArrays();
   }
 
@@ -351,13 +359,13 @@ export class FormationsOverlay {
     el.style.transform = 'translate(-50%,-50%)';
   }
 
-  private applyWiki(el: HTMLDivElement, meta: FeatureMeta): void {
-    if (this.wikiMode && meta.wikiEligible) {
+  private applyLink(el: HTMLDivElement, meta: FeatureMeta): void {
+    if (this.linkMode && meta.linkEligible) {
       el.style.textDecoration = 'underline';
       el.style.cursor = 'pointer';
       el.style.pointerEvents = 'auto';
-      el.dataset.wikiUrl = meta.wikiUrl;
-      el.onclick = this._onWikiClick;
+      el.dataset.infoUrl = meta.infoUrl;
+      el.onclick = this._onLinkClick;
     } else {
       el.style.textDecoration = 'none';
       el.style.cursor = '';
@@ -460,12 +468,12 @@ export class FormationsOverlay {
         if (cat.poolFeatureIndex[used] !== fi) {
           el.textContent = feature.name;
           this.applyLabel(el, c as Category);
-          this.applyWiki(el, this.allMeta[fi]);
+          this.applyLink(el, this.allMeta[fi]);
           cat.poolFeatureIndex[used] = fi;
-          cat.poolWikiState[used] = this.wikiMode;
-        } else if (cat.poolWikiState[used] !== this.wikiMode) {
-          this.applyWiki(el, this.allMeta[fi]);
-          cat.poolWikiState[used] = this.wikiMode;
+          cat.poolLinkState[used] = this.linkMode;
+        } else if (cat.poolLinkState[used] !== this.linkMode) {
+          this.applyLink(el, this.allMeta[fi]);
+          cat.poolLinkState[used] = this.linkMode;
         }
 
         el.style.left = `${x}px`;
@@ -512,7 +520,7 @@ export class FormationsOverlay {
       cat.pool = [];
       cat.indices = [];
       cat.poolFeatureIndex = [];
-      cat.poolWikiState = [];
+      cat.poolLinkState = [];
     }
     this.allFeatures = [];
     this.allMeta = [];

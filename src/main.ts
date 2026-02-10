@@ -12,6 +12,13 @@ import { computeSunPosition, SunInfo } from './astro/SunPosition';
 import { computeEarthViewPosition } from './astro/EarthView';
 import { Starfield } from './scene/Starfield';
 
+// Workshop mode imports
+import { extractLDEMRegion } from './workshop/LDEMRangeLoader';
+import { buildBrickGeometry, updateBrickExaggeration, type BrickResult } from './workshop/BrickMeshBuilder';
+import { WorkshopScene } from './workshop/WorkshopScene';
+import { WorkshopGui } from './workshop/WorkshopGui';
+import { exportMeshAsSTL, makeSTLFilename } from './workshop/STLExport';
+
 // --- Initialization ---
 const moonScene = new MoonScene();
 const lighting = new Lighting(moonScene.scene);
@@ -159,7 +166,7 @@ const gui = new GuiControls(lighting, globe, {
     formations.setCategoryCount(2, count); // 2 = Other
   },
   onToggleWiki: (enabled: boolean) => {
-    formations.setWikiMode(enabled);
+    formations.setLinkMode(enabled);
   },
   onSearchFeature: (name: string) => {
     const result = formations.getFeatureWorldPos(name);
@@ -184,6 +191,9 @@ const gui = new GuiControls(lighting, globe, {
   onClearSearch: () => {
     formations.highlightFeature(null);
   },
+  onExtractForPrint: (name: string) => {
+    enterWorkshop(name);
+  },
   onDateTimeChange: (date: Date) => {
     currentDateTime = date;
     applySunPosition(date);
@@ -196,14 +206,6 @@ const gui = new GuiControls(lighting, globe, {
     moonScene.camera.position.copy(earthView.direction).multiplyScalar(SPHERE_RADIUS * 3.5);
     moonScene.controls.target.set(0, 0, 0);
   },
-  onShadowsToggle: (enabled: boolean) => {
-    if (enabled) {
-      lighting.enableShadows(moonScene.renderer);
-    } else {
-      lighting.disableShadows(moonScene.renderer);
-    }
-    console.log(`Shadows: ${enabled ? 'ON' : 'OFF'}`);
-  },
   getStats: () => ({
     tiles: tileManager.renderedTileCount,
     triangles: tileManager.totalTriangles,
@@ -213,9 +215,192 @@ const gui = new GuiControls(lighting, globe, {
 // Set initial HUD sun info (after HUD is created)
 hud.setSunInfo(initialSun.subSolarLat, initialSun.subSolarLon, currentDateTime);
 
+// --- Workshop mode state ---
+let workshopMode = false;
+let workshopScene: WorkshopScene | null = null;
+let workshopGui: WorkshopGui | null = null;
+let workshopBrick: BrickResult | null = null;
+let workshopFeatureName = '';
+let workshopExaggeration = 5;
+let workshopMargin = 1.5;
+let workshopBaseThickness = 0.5; // km
+
+// DOM elements to hide/show
+const hudEl = document.getElementById('hud');
+const titleEl = document.getElementById('title');
+
+// Loading overlay
+const loadingOverlay = document.createElement('div');
+loadingOverlay.style.cssText =
+  'position:fixed;inset:0;display:none;z-index:10000;' +
+  'background:rgba(0,0,0,0.75);color:#fff;' +
+  'font:18px "Segoe UI",sans-serif;' +
+  'justify-content:center;align-items:center;text-align:center;';
+document.body.appendChild(loadingOverlay);
+
+function showLoading(msg: string): void {
+  loadingOverlay.textContent = msg;
+  loadingOverlay.style.display = 'flex';
+}
+function hideLoading(): void {
+  loadingOverlay.style.display = 'none';
+}
+
+/** Enter workshop mode: extract terrain around a named feature */
+async function enterWorkshop(featureName: string): Promise<void> {
+  const info = formations.getFeatureInfo(featureName);
+  if (!info) { console.warn('Feature not found:', featureName); return; }
+
+  showLoading(`Extracting terrain around ${featureName}...`);
+
+  try {
+    // Compute extraction zone
+    const MOON_RADIUS_KM = 1737.4;
+    const KM_PER_DEG_LAT = (Math.PI * MOON_RADIUS_KM) / 180;
+    const cosLat = Math.cos(info.lat * Math.PI / 180);
+    const diamKm = info.diameter;
+    const halfExtentKm = (diamKm / 2) * workshopMargin;
+    const halfExtentLat = halfExtentKm / KM_PER_DEG_LAT;
+    const halfExtentLon = halfExtentKm / (KM_PER_DEG_LAT * cosLat);
+
+    const latMin = Math.max(-90, info.lat - halfExtentLat);
+    const latMax = Math.min(90, info.lat + halfExtentLat);
+    const lonMin = info.lon - halfExtentLon;
+    const lonMax = info.lon + halfExtentLon;
+
+    // Extract LDEM region
+    const heightmap = await extractLDEMRegion(latMin, latMax, lonMin, lonMax, (msg) => {
+      showLoading(`${featureName}: ${msg}`);
+    });
+
+    // Build brick geometry
+    showLoading(`Building 3D mesh...`);
+    const brick = buildBrickGeometry({
+      heightmap,
+      exaggeration: workshopExaggeration,
+      baseThickness: workshopBaseThickness,
+    });
+
+    workshopBrick = brick;
+    workshopFeatureName = featureName;
+
+    // Create workshop scene (lazy — reuses main renderer)
+    if (!workshopScene) {
+      workshopScene = new WorkshopScene(moonScene.renderer);
+    }
+    workshopScene.setBrick(brick);
+
+    // Create workshop GUI
+    if (workshopGui) workshopGui.dispose();
+    workshopGui = new WorkshopGui(featureName, {
+      onMarginChange: (factor: number) => {
+        workshopMargin = factor;
+        // Re-extract with new margin
+        enterWorkshop(workshopFeatureName);
+      },
+      onExaggerationChange: (exag: number) => {
+        workshopExaggeration = exag;
+        if (workshopBrick && workshopScene) {
+          updateBrickExaggeration(workshopBrick, exag, workshopBaseThickness, workshopBrick.geometry);
+          workshopScene.updateGeometry(workshopBrick.geometry);
+        }
+      },
+      onLightAzimuthChange: (deg: number) => {
+        workshopScene?.setLightDirection(deg, workshopLightElevation);
+        workshopLightAzimuth = deg;
+      },
+      onLightElevationChange: (deg: number) => {
+        workshopScene?.setLightDirection(workshopLightAzimuth, deg);
+        workshopLightElevation = deg;
+      },
+      onWireframeChange: (enabled: boolean) => {
+        workshopScene?.setWireframe(enabled);
+      },
+      onExportSTL: () => {
+        if (!workshopScene) return;
+        const mesh = workshopScene.getBrickMesh();
+        if (!mesh) return;
+        const filename = makeSTLFilename(workshopFeatureName, workshopExaggeration);
+        exportMeshAsSTL(mesh, filename);
+      },
+      onBack: () => {
+        exitWorkshop();
+      },
+    });
+
+    // Switch to workshop mode
+    workshopMode = true;
+    workshopScene.activate();
+    moonScene.controls.enabled = false;
+
+    // Hide globe elements
+    globe.setVisible(false);
+    tileManager.setVisible(false);
+    starfield.setVisible(false);
+    graticule.setVisible(false);
+    formations.setVisible(false);
+    if (hudEl) hudEl.style.display = 'none';
+    if (titleEl) titleEl.style.display = 'none';
+    gui.hide();
+
+    hideLoading();
+    console.log(`Workshop mode: ${featureName} (${brick.cols}×${brick.rows}, ${brick.widthKm.toFixed(1)}×${brick.heightKm.toFixed(1)} km)`);
+
+  } catch (err) {
+    hideLoading();
+    console.error('Workshop extraction failed:', err);
+    alert(`Failed to extract terrain: ${(err as Error).message}`);
+  }
+}
+
+let workshopLightAzimuth = 45;
+let workshopLightElevation = 30;
+
+/** Exit workshop mode and return to globe */
+function exitWorkshop(): void {
+  workshopMode = false;
+
+  // Deactivate workshop
+  if (workshopScene) workshopScene.deactivate();
+  moonScene.controls.enabled = true;
+
+  // Dispose workshop GUI
+  if (workshopGui) {
+    workshopGui.dispose();
+    workshopGui = null;
+  }
+
+  // Dispose brick geometry
+  if (workshopBrick) {
+    workshopBrick.geometry.dispose();
+    workshopBrick = null;
+  }
+
+  // Restore globe elements
+  globe.setVisible(!adaptiveMode);
+  tileManager.setVisible(adaptiveMode);
+  starfield.setVisible(true);
+  if (hudEl) hudEl.style.display = '';
+  if (titleEl) titleEl.style.display = '';
+  gui.show();
+
+  // Note: graticule & formations visibility are controlled by their own toggles,
+  // so we don't force them back on — they'll be in whatever state the user left them.
+
+  console.log('Exited workshop mode');
+}
+
 // --- Render loop ---
 function animate(time: number) {
   requestAnimationFrame(animate);
+
+  if (workshopMode) {
+    // Workshop render loop
+    workshopScene?.render();
+    return;
+  }
+
+  // --- Globe render loop ---
 
   // Adapt rotation/pan speed to zoom level
   const dist = moonScene.camera.position.length();

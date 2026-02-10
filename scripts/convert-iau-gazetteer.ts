@@ -21,6 +21,7 @@ interface LunarFeature {
   lon: number;
   diameter: number;
   type: string;
+  id: number;       // USGS Gazetteer feature ID (from link field)
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────
@@ -36,8 +37,16 @@ function extractSimpleData(block: string, name: string): string {
 function normalizeType(raw: string): string {
   // IAU uses "Crater, craters", "Mare, maria", "Mons, montes", etc.
   const first = raw.split(',')[0].trim();
-  // Also handle "Satellite Feature" → skip these (they are named sub-craters like "Copernicus A")
+  // Satellite Features are sub-craters (e.g. "Copernicus A") → classify as Crater
+  if (first === 'Satellite Feature') return 'Crater';
   return first;
+}
+
+/** Extract the USGS Gazetteer feature ID from the link field. */
+function extractFeatureId(block: string): number {
+  const link = extractSimpleData(block, 'link');
+  const m = link.match(/Feature\/(\d+)/);
+  return m ? parseInt(m[1], 10) : 0;
 }
 
 // ─── Main ────────────────────────────────────────────────────────
@@ -50,9 +59,10 @@ const placemarks = kml.split('<Placemark ');
 console.log(`Found ${placemarks.length - 1} Placemarks`);
 
 const features: LunarFeature[] = [];
-let skippedSatellite = 0;
 let skippedNoName = 0;
 let skippedNoDiameter = 0;
+let skippedNoId = 0;
+let satelliteCount = 0;
 
 for (let i = 1; i < placemarks.length; i++) {
   const block = placemarks[i];
@@ -64,10 +74,12 @@ for (let i = 1; i < placemarks.length; i++) {
   if (approval !== 'Adopted by IAU') continue;
 
   const rawType = extractSimpleData(block, 'type');
+  const isSatellite = rawType.startsWith('Satellite');
   const type = normalizeType(rawType);
+  if (isSatellite) satelliteCount++;
 
-  // Skip satellite features (sub-craters like "Copernicus A")
-  if (type === 'Satellite Feature') { skippedSatellite++; continue; }
+  const id = extractFeatureId(block);
+  if (!id) { skippedNoId++; continue; }
 
   const diameterStr = extractSimpleData(block, 'diameter');
   const diameter = parseFloat(diameterStr);
@@ -88,6 +100,7 @@ for (let i = 1; i < placemarks.length; i++) {
     lon: Math.round(lon * 10000) / 10000,
     diameter: Math.round(diameter * 100) / 100,
     type,
+    id,
   });
 }
 
@@ -96,12 +109,13 @@ features.sort((a, b) => b.diameter - a.diameter);
 
 console.log(`\nResults:`);
 console.log(`  Total features: ${features.length}`);
-console.log(`  Skipped satellite features: ${skippedSatellite}`);
+console.log(`  Including satellite features (sub-craters): ${satelliteCount}`);
 console.log(`  Skipped no name: ${skippedNoName}`);
 console.log(`  Skipped no diameter: ${skippedNoDiameter}`);
+console.log(`  Skipped no USGS ID: ${skippedNoId}`);
 console.log(`  Top 10:`);
 for (const f of features.slice(0, 10)) {
-  console.log(`    ${f.name} (${f.type}) — ${f.diameter} km at ${f.lat}°, ${f.lon}°`);
+  console.log(`    ${f.name} (${f.type}, id=${f.id}) — ${f.diameter} km at ${f.lat}°, ${f.lon}°`);
 }
 
 // Count by type

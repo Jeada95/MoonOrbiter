@@ -30,9 +30,9 @@ export interface MultiTileCallbacks {
   onToggleWiki: (enabled: boolean) => void;
   onSearchFeature: (name: string) => void;
   onClearSearch: () => void;
+  onExtractForPrint: (name: string) => void;
   onDateTimeChange: (date: Date) => void;
   onNowPressed: (date: Date) => void;
-  onShadowsToggle: (enabled: boolean) => void;
   getStats: () => { tiles: number; triangles: number };
 }
 
@@ -41,6 +41,8 @@ export class GuiControls {
   private statsDisplay: any = null;
   private featureNames: string[] = [];
   private searchWrapper: HTMLDivElement | null = null;
+  private printBtn: HTMLButtonElement | null = null;
+  private selectedFeature: string | null = null;
 
   constructor(lighting: Lighting, globe: Globe, multiTile: MultiTileCallbacks) {
     this.gui = new GUI({ title: 'MoonOrbiter' });
@@ -53,18 +55,12 @@ export class GuiControls {
 
     const sunParams = {
       sunIntensity: lighting.sunLight.intensity,
-      shadows: false,
     };
 
     sunFolder
       .add(sunParams, 'sunIntensity', 0, 5, 0.1)
       .name('Intensity')
       .onChange((v: number) => { lighting.sunLight.intensity = v; });
-
-    sunFolder
-      .add(sunParams, 'shadows')
-      .name('Shadows')
-      .onChange((v: boolean) => multiTile.onShadowsToggle(v));
 
     sunFolder.open();
 
@@ -181,7 +177,7 @@ export class GuiControls {
 
     const wikiCtrl = this.gui
       .add(formationsParams, 'wiki')
-      .name('Wiki links')
+      .name('Info links')
       .onChange((v: boolean) => multiTile.onToggleWiki(v));
     wikiCtrl.hide();
     subCtrls.push(wikiCtrl);
@@ -340,6 +336,21 @@ export class GuiControls {
     label.style.cssText =
       'flex-shrink:0;width:40%;color:#b8b8b8;font:11px "Segoe UI",sans-serif;';
 
+    // ─── 3D Print button ───────────────────────────────────
+    const printBtn = document.createElement('button');
+    printBtn.textContent = '🖨';
+    printBtn.title = '3D Print Workshop';
+    printBtn.style.cssText =
+      'flex:0 0 auto;width:24px;height:24px;padding:0;margin-right:4px;' +
+      'background:#333;color:#ddd;border:1px solid #555;border-radius:3px;' +
+      'font:14px sans-serif;cursor:pointer;line-height:24px;text-align:center;display:none;';
+    printBtn.addEventListener('mouseenter', () => { printBtn.style.background = '#555'; });
+    printBtn.addEventListener('mouseleave', () => { printBtn.style.background = '#333'; });
+    printBtn.addEventListener('click', () => {
+      if (this.selectedFeature) multiTile.onExtractForPrint(this.selectedFeature);
+    });
+    this.printBtn = printBtn;
+
     // ─── Toggle button (looks like a select) ─────────────────
     const toggleWrap = document.createElement('div');
     toggleWrap.style.cssText = 'position:relative;flex:1;min-width:0;';
@@ -383,6 +394,7 @@ export class GuiControls {
     toggleWrap.appendChild(clearBtn);
     toggleWrap.appendChild(panel);
     wrapper.appendChild(label);
+    wrapper.appendChild(printBtn);
     wrapper.appendChild(toggleWrap);
 
     let isOpen = false;
@@ -408,6 +420,8 @@ export class GuiControls {
           toggle.textContent = name + ' ▾';
           toggle.style.color = '#ddd';
           clearBtn.style.display = '';
+          this.selectedFeature = name;
+          if (this.printBtn) this.printBtn.style.display = '';
           closePanel();
           multiTile.onSearchFeature(name);
         });
@@ -437,6 +451,8 @@ export class GuiControls {
       toggle.textContent = 'Select ▾';
       toggle.style.color = '#999';
       clearBtn.style.display = 'none';
+      this.selectedFeature = null;
+      if (this.printBtn) this.printBtn.style.display = 'none';
       closePanel();
       multiTile.onClearSearch();
     });
@@ -455,6 +471,16 @@ export class GuiControls {
     });
 
     return wrapper;
+  }
+
+  /** Hide the main GUI (when entering workshop mode) */
+  hide(): void {
+    this.gui.domElement.style.display = 'none';
+  }
+
+  /** Show the main GUI (when leaving workshop mode) */
+  show(): void {
+    this.gui.domElement.style.display = '';
   }
 
   dispose() {

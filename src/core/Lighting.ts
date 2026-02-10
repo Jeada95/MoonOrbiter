@@ -42,33 +42,4 @@ export class Lighting {
     this.sunLight.position.copy(dir).multiplyScalar(SUN_DIST);
   }
 
-  // ─── Shadow mapping ────────────────────────────────────────
-
-  enableShadows(renderer: THREE.WebGLRenderer): void {
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-
-    this.sunLight.castShadow = true;
-    this.sunLight.shadow.mapSize.set(2048, 2048);
-
-    // Orthographic shadow camera encompassing the sphere
-    const s = SPHERE_RADIUS * 1.5;
-    this.sunLight.shadow.camera.near = SPHERE_RADIUS * 30;
-    this.sunLight.shadow.camera.far = SPHERE_RADIUS * 70;
-    this.sunLight.shadow.camera.left = -s;
-    this.sunLight.shadow.camera.right = s;
-    this.sunLight.shadow.camera.top = s;
-    this.sunLight.shadow.camera.bottom = -s;
-    this.sunLight.shadow.bias = -0.0005;
-    this.sunLight.shadow.camera.updateProjectionMatrix();
-
-    // Force shadow map reallocation
-    this.sunLight.shadow.map?.dispose();
-    this.sunLight.shadow.map = null as any;
-  }
-
-  disableShadows(renderer: THREE.WebGLRenderer): void {
-    renderer.shadowMap.enabled = false;
-    this.sunLight.castShadow = false;
-  }
 }

@@ -102,6 +102,10 @@ export class Starfield {
     scene.add(this.points);
   }
 
+  setVisible(visible: boolean): void {
+    this.points.visible = visible;
+  }
+
   dispose(): void {
     this.points.geometry.dispose();
     (this.points.material as THREE.Material).dispose();
