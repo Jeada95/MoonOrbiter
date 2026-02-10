@@ -22,6 +22,7 @@ export interface MultiTileCallbacks {
   onExaggerationChange: (v: number) => void;
   onWireframeChange: (enabled: boolean) => void;
   onResolutionChange: (resolution: GridResolution) => void;
+  onToggleGraticule: (enabled: boolean) => void;
   getStats: () => { tiles: number; triangles: number };
 }
 
@@ -114,6 +115,13 @@ export class GuiControls {
           photoFolder.open();
         }
       };
+
+      // --- Checkbox Grille lat/lon ---
+      const overlayParams = { grille: false };
+      this.gui
+        .add(overlayParams, 'grille')
+        .name('Grille lat/lon')
+        .onChange((v: boolean) => multiTile.onToggleGraticule(v));
     }
 
     // --- Folder Photo ---
