@@ -5,6 +5,7 @@ import { Globe } from './moon/Globe';
 import { HUD } from './ui/HUD';
 import { GuiControls } from './ui/GuiControls';
 import { MultiResTileManager } from './adaptive/MultiResTileManager';
+import { GraticuleOverlay } from './overlays/GraticuleOverlay';
 
 // --- Initialisation ---
 const moonScene = new MoonScene();
@@ -71,6 +72,9 @@ globe.loadLDEM('/moon-data/raw/LDEM_64.IMG', 23040, 11520, 0.5)
 const tileManager = new MultiResTileManager(moonScene.scene);
 let adaptiveMode = false;
 
+// --- Grille lat/lon ---
+const graticule = new GraticuleOverlay(moonScene.scene);
+
 // Résolution → description pour le HUD
 const RES_HUD_INFO: Record<number, string> = {
   513:  'LDEM 64ppd — ~889 m/px',
@@ -106,6 +110,9 @@ const gui = new GuiControls(lighting, globe, {
   onWireframeChange: (enabled: boolean) => {
     tileManager.setWireframe(enabled);
   },
+  onToggleGraticule: (enabled: boolean) => {
+    graticule.setVisible(enabled);
+  },
   getStats: () => ({
     tiles: tileManager.renderedTileCount,
     triangles: tileManager.totalTriangles,
@@ -127,6 +134,9 @@ function animate(time: number) {
 
   // Passer la scène entière (globe + tuiles) au HUD pour le raycast
   hud.update(moonScene.camera, moonScene.scene, time);
+
+  // Labels de la grille lat/lon
+  graticule.update(moonScene.camera);
 
   // Mise à jour du gestionnaire de tuiles adaptatives si actif
   if (adaptiveMode) {

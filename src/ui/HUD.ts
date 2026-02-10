@@ -82,8 +82,10 @@ export class HUD {
         const lonDisplay = lonNorm > 180 ? lonNorm - 360 : lonNorm;
         const latDir = lat >= 0 ? 'N' : 'S';
         const lonDir = lonDisplay >= 0 ? 'E' : 'W';
+        const latSign = lat >= 0 ? '+' : '';
+        const lonSign = lonDisplay >= 0 ? '+' : '';
         this.elCoords.textContent =
-          `Lat: ${Math.abs(lat).toFixed(2)}° ${latDir}  Lon: ${Math.abs(lonDisplay).toFixed(2)}° ${lonDir}`;
+          `Lat: ${latSign}${lat.toFixed(2)}° (${latDir})  Lon: ${lonSign}${lonDisplay.toFixed(2)}° (${lonDir})`;
       } else {
         this.elCoords.textContent = 'Lat: --  Lon: --';
       }
