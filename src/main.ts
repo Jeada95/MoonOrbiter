@@ -6,44 +6,45 @@ import { HUD } from './ui/HUD';
 import { GuiControls } from './ui/GuiControls';
 import { MultiResTileManager } from './adaptive/MultiResTileManager';
 import { GraticuleOverlay } from './overlays/GraticuleOverlay';
+import { FormationsOverlay } from './overlays/FormationsOverlay';
 
-// --- Initialisation ---
+// --- Initialization ---
 const moonScene = new MoonScene();
 const lighting = new Lighting(moonScene.scene);
 
-// Globe avec vrai mesh déformé par LOLA
+// Globe with real LOLA-deformed mesh
 const globe = new Globe();
 globe.addToScene(moonScene.scene);
 
 
-// --- Charger les données ---
+// --- Load data ---
 const textureLoader = new THREE.TextureLoader();
 
-// Variable pour stocker la texture LROC (partagée entre Globe et TileManager)
+// Shared LROC texture between Globe and TileManager
 let lrocTexture: THREE.Texture | null = null;
 
-// 1) Texture couleur LROC
+// 1) LROC color texture
 textureLoader.load(
   '/moon-data/moon_texture_4k.jpg',
   (texture) => {
     lrocTexture = texture;
     globe.setTexture(texture);
     tileManager.setTexture(texture);
-    console.log('Texture LROC 4K chargée');
+    console.log('LROC 4K texture loaded');
   },
   undefined,
   (err) => {
-    console.warn('Échec texture 4K, tentative 2K...', err);
+    console.warn('4K texture failed, trying 2K...', err);
     textureLoader.load(
       '/moon-data/moon_texture_2k.jpg',
       (texture) => {
         lrocTexture = texture;
         globe.setTexture(texture);
         tileManager.setTexture(texture);
-        console.log('Texture LROC 2K chargée');
+        console.log('LROC 2K texture loaded');
       },
       undefined,
-      (err2) => console.error('Impossible de charger la texture', err2)
+      (err2) => console.error('Failed to load texture', err2)
     );
   }
 );
@@ -63,19 +64,25 @@ textureLoader.load(
   }
 );
 
-// 3) Données d'élévation — directement depuis LDEM NASA (Int16 LE, DN × 0.5 = mètres)
+// 3) Elevation data — directly from NASA LDEM (Int16 LE, DN × 0.5 = meters)
 globe.loadLDEM('/moon-data/raw/LDEM_64.IMG', 23040, 11520, 0.5)
-  .then(() => console.log('Élévation LDEM 64ppd appliquée'))
-  .catch((err) => console.error('Erreur chargement LDEM:', err));
+  .then(() => console.log('LDEM 64ppd elevation applied'))
+  .catch((err) => console.error('LDEM loading error:', err));
 
-// --- Maillage adaptatif multi-tuiles ---
+// --- Multi-resolution adaptive tiling ---
 const tileManager = new MultiResTileManager(moonScene.scene);
 let adaptiveMode = false;
 
-// --- Grille lat/lon ---
+// --- Lat/lon grid ---
 const graticule = new GraticuleOverlay(moonScene.scene);
 
-// Résolution → description pour le HUD
+// --- Lunar formations ---
+const formations = new FormationsOverlay();
+formations.loadData('/moon-data/lunar_features.json')
+  .then(() => console.log('Lunar features loaded'))
+  .catch((err) => console.warn('Failed to load lunar features:', err));
+
+// Resolution → HUD description
 const RES_HUD_INFO: Record<number, string> = {
   513:  'LDEM 64ppd — ~889 m/px',
   1025: 'LDEM 64ppd — ~444 m/px',
@@ -91,7 +98,7 @@ const gui = new GuiControls(lighting, globe, {
     globe.setVisible(!enabled);
     tileManager.setVisible(enabled);
     hud.setResolutionInfo(enabled ? RES_HUD_INFO[currentAdaptiveRes] : 'LDEM 64ppd — Globe');
-    console.log(`Mode adaptatif: ${enabled ? 'ON' : 'OFF'}`);
+    console.log(`Adaptive mode: ${enabled ? 'ON' : 'OFF'}`);
   },
   onResolutionChange: (resolution) => {
     currentAdaptiveRes = resolution;
@@ -99,7 +106,7 @@ const gui = new GuiControls(lighting, globe, {
     if (adaptiveMode) {
       hud.setResolutionInfo(RES_HUD_INFO[resolution] || `LDEM — ${resolution}px`);
     }
-    console.log(`Résolution: ${resolution}`);
+    console.log(`Resolution: ${resolution}`);
   },
   onMaxErrorChange: (maxError: number) => {
     tileManager.setMaxError(maxError);
@@ -113,18 +120,26 @@ const gui = new GuiControls(lighting, globe, {
   onToggleGraticule: (enabled: boolean) => {
     graticule.setVisible(enabled);
   },
+  onToggleFormations: (enabled: boolean) => {
+    formations.setVisible(enabled);
+  },
+  onFormationsCountChange: (count: number) => {
+    formations.setCount(count);
+  },
+  onToggleWiki: (enabled: boolean) => {
+    formations.setWikiMode(enabled);
+  },
   getStats: () => ({
     tiles: tileManager.renderedTileCount,
     triangles: tileManager.totalTriangles,
   }),
 });
 
-// --- Boucle de rendu ---
+// --- Render loop ---
 function animate(time: number) {
   requestAnimationFrame(animate);
 
-  // Adapter la vitesse de rotation/pan au niveau de zoom
-  // Plus on est proche, plus on ralentit (facteur linéaire normalisé)
+  // Adapt rotation/pan speed to zoom level
   const dist = moonScene.camera.position.length();
   const distRatio = (dist - moonScene.controls.minDistance)
                   / (moonScene.controls.maxDistance - moonScene.controls.minDistance);
@@ -132,13 +147,16 @@ function animate(time: number) {
   moonScene.controls.rotateSpeed = 0.4 * speedFactor;
   moonScene.controls.panSpeed = 0.4 * speedFactor;
 
-  // Passer la scène entière (globe + tuiles) au HUD pour le raycast
+  // HUD update (raycast for coordinates, scale bar, FPS)
   hud.update(moonScene.camera, moonScene.scene, time);
 
-  // Labels de la grille lat/lon
+  // Graticule labels
   graticule.update(moonScene.camera);
 
-  // Mise à jour du gestionnaire de tuiles adaptatives si actif
+  // Formation labels
+  formations.update(moonScene.camera);
+
+  // Adaptive tile manager
   if (adaptiveMode) {
     tileManager.update(moonScene.camera);
   }
@@ -148,5 +166,5 @@ function animate(time: number) {
 
 requestAnimationFrame(animate);
 
-console.log('MoonOrbiter démarré');
-console.log('Contrôles: Souris gauche = orbite, Molette = zoom, Souris droite = pan');
+console.log('MoonOrbiter started');
+console.log('Controls: Left mouse = orbit, Wheel = zoom, Right mouse = pan');
