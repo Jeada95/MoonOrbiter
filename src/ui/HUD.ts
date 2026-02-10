@@ -46,7 +46,7 @@ export class HUD {
 
   update(
     camera: THREE.Camera,
-    sceneRoot: THREE.Object3D,
+    raycastTargets: THREE.Object3D[],
     time: number
   ) {
     // FPS
@@ -72,7 +72,7 @@ export class HUD {
       this.mouseDirty = false;
 
       this.raycaster.setFromCamera(this.mouse, camera);
-      const intersects = this.raycaster.intersectObjects(sceneRoot.children, true);
+      const intersects = this.raycaster.intersectObjects(raycastTargets, false);
 
       if (intersects.length > 0) {
         const point = intersects[0].point;
