@@ -7,6 +7,7 @@ export class HUD {
   private elCoords: HTMLElement;
   private elAlt: HTMLElement;
   private elResolution: HTMLElement;
+  private elSun: HTMLElement;
   private elFps: HTMLElement;
 
   // Scale bar elements
@@ -27,6 +28,7 @@ export class HUD {
     this.elCoords = document.getElementById('hud-coords')!;
     this.elAlt = document.getElementById('hud-alt')!;
     this.elResolution = document.getElementById('hud-resolution')!;
+    this.elSun = document.getElementById('hud-sun')!;
     this.elFps = document.getElementById('hud-fps')!;
 
     this.elScaleBar = document.getElementById('scalebar-bar')!;
@@ -117,6 +119,21 @@ export class HUD {
 
   setResolutionInfo(text: string) {
     this.elResolution.textContent = text;
+  }
+
+  /** Display sub-solar coordinates and datetime */
+  setSunInfo(lat: number, lon: number, date: Date): void {
+    const latDir = lat >= 0 ? 'N' : 'S';
+    const lonDir = lon >= 0 ? 'E' : 'W';
+    const latSign = lat >= 0 ? '+' : '';
+    const lonSign = lon >= 0 ? '+' : '';
+    const utc = date.toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+    this.elSun.textContent =
+      `Sun: ${latSign}${lat.toFixed(1)}° (${latDir}) ${lonSign}${lon.toFixed(1)}° (${lonDir}) | ${utc}`;
+  }
+
+  clearSunInfo(): void {
+    this.elSun.textContent = 'Sun: manual mode';
   }
 
   dispose() {

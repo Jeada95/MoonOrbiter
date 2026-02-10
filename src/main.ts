@@ -8,10 +8,16 @@ import { MultiResTileManager } from './adaptive/MultiResTileManager';
 import { GraticuleOverlay } from './overlays/GraticuleOverlay';
 import { FormationsOverlay } from './overlays/FormationsOverlay';
 import { SPHERE_RADIUS } from './utils/config';
+import { computeSunPosition, SunInfo } from './astro/SunPosition';
+import { computeEarthViewPosition } from './astro/EarthView';
+import { Starfield } from './scene/Starfield';
 
 // --- Initialization ---
 const moonScene = new MoonScene();
 const lighting = new Lighting(moonScene.scene);
+
+// --- Starfield background ---
+const starfield = new Starfield(moonScene.scene);
 
 // Globe with real LOLA-deformed mesh
 const globe = new Globe();
@@ -85,6 +91,23 @@ formations.loadData('/moon-data/lunar_features.json')
     gui.setFeatureNames(formations.getAllFeatureNames());
   })
   .catch((err) => console.warn('Failed to load lunar features:', err));
+
+// --- Sun + Earth-view: astronomical positioning at startup ---
+let sunMode: 'manual' | 'astronomical' = 'astronomical';
+let currentDateTime = new Date();
+const initialSun = computeSunPosition(currentDateTime);
+lighting.setSunDirection(initialSun.direction);
+
+// Position camera as seen from Earth (with libration)
+const initialEarthView = computeEarthViewPosition(currentDateTime);
+moonScene.camera.position.copy(initialEarthView.direction).multiplyScalar(SPHERE_RADIUS * 3.5);
+
+function applySunPosition(date: Date): SunInfo {
+  const info = computeSunPosition(date);
+  lighting.setSunDirection(info.direction);
+  hud.setSunInfo(info.subSolarLat, info.subSolarLon, date);
+  return info;
+}
 
 // Resolution → HUD description
 const RES_HUD_INFO: Record<number, string> = {
@@ -162,11 +185,47 @@ const gui = new GuiControls(lighting, globe, {
   onClearSearch: () => {
     formations.highlightFeature(null);
   },
+  onSunModeChange: (astronomical: boolean) => {
+    sunMode = astronomical ? 'astronomical' : 'manual';
+    if (astronomical) {
+      applySunPosition(currentDateTime);
+    } else {
+      hud.clearSunInfo();
+    }
+    console.log(`Sun mode: ${sunMode}`);
+  },
+  onDateTimeChange: (date: Date) => {
+    currentDateTime = date;
+    if (sunMode === 'astronomical') {
+      applySunPosition(date);
+    }
+  },
+  onNowPressed: (date: Date) => {
+    currentDateTime = date;
+    if (sunMode === 'astronomical') {
+      applySunPosition(date);
+    }
+    // Reset camera to Earth-view for current time
+    const earthView = computeEarthViewPosition(date);
+    moonScene.camera.position.copy(earthView.direction).multiplyScalar(SPHERE_RADIUS * 3.5);
+    moonScene.controls.target.set(0, 0, 0);
+  },
+  onShadowsToggle: (enabled: boolean) => {
+    if (enabled) {
+      lighting.enableShadows(moonScene.renderer);
+    } else {
+      lighting.disableShadows(moonScene.renderer);
+    }
+    console.log(`Shadows: ${enabled ? 'ON' : 'OFF'}`);
+  },
   getStats: () => ({
     tiles: tileManager.renderedTileCount,
     triangles: tileManager.totalTriangles,
   }),
 });
+
+// Set initial HUD sun info (after HUD is created)
+hud.setSunInfo(initialSun.subSolarLat, initialSun.subSolarLon, currentDateTime);
 
 // --- Render loop ---
 function animate(time: number) {

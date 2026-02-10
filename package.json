@@ -16,6 +16,7 @@
     "vite": "^6.1.0"
   },
   "dependencies": {
+    "astronomy-engine": "^2.1.19",
     "copc": "^0.0.8",
     "lil-gui": "^0.20.0",
     "three": "^0.172.0"

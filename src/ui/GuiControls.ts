@@ -30,6 +30,10 @@ export interface MultiTileCallbacks {
   onToggleWiki: (enabled: boolean) => void;
   onSearchFeature: (name: string) => void;
   onClearSearch: () => void;
+  onSunModeChange: (astronomical: boolean) => void;
+  onDateTimeChange: (date: Date) => void;
+  onNowPressed: (date: Date) => void;
+  onShadowsToggle: (enabled: boolean) => void;
   getStats: () => { tiles: number; triangles: number };
 }
 
@@ -43,20 +47,67 @@ export class GuiControls {
     this.gui = new GUI({ title: 'MoonOrbiter' });
 
     // --- Sun ---
-    const sunParams = {
-      sunAngle: lighting.getSunAngleDegrees(),
-      sunIntensity: lighting.sunLight.intensity,
-    };
-
     const sunFolder = this.gui.addFolder('Sun');
-    sunFolder
-      .add(sunParams, 'sunAngle', 0, 360, 1)
-      .name('Angle')
-      .onChange((v: number) => lighting.setSunAngle(v));
-    sunFolder
-      .add(sunParams, 'sunIntensity', 0, 5, 0.1)
-      .name('Intensity')
-      .onChange((v: number) => { lighting.sunLight.intensity = v; });
+
+    if (multiTile) {
+      const sunParams = {
+        astronomical: true,
+        sunAngle: lighting.getSunAngleDegrees(),
+        sunIntensity: lighting.sunLight.intensity,
+        shadows: false,
+      };
+
+      // ─── Astronomical checkbox ───
+      const astroCtrl = sunFolder
+        .add(sunParams, 'astronomical')
+        .name('Astronomical')
+        .onChange((v: boolean) => {
+          multiTile.onSunModeChange(v);
+          if (v) {
+            angleCtrl.hide();
+            dtWrapper.style.display = '';
+          } else {
+            angleCtrl.show();
+            dtWrapper.style.display = 'none';
+          }
+        });
+
+      // ─── Datetime picker (custom DOM widget) ───
+      const dtWrapper = this.buildDateTimeWidget(sunFolder, multiTile);
+
+      // ─── Angle slider (hidden by default — only visible in manual mode) ───
+      const angleCtrl = sunFolder
+        .add(sunParams, 'sunAngle', 0, 360, 1)
+        .name('Angle')
+        .onChange((v: number) => lighting.setSunAngle(v));
+      angleCtrl.hide(); // Start in astronomical mode
+
+      // ─── Intensity ───
+      sunFolder
+        .add(sunParams, 'sunIntensity', 0, 5, 0.1)
+        .name('Intensity')
+        .onChange((v: number) => { lighting.sunLight.intensity = v; });
+
+      // ─── Shadows checkbox ───
+      sunFolder
+        .add(sunParams, 'shadows')
+        .name('Shadows')
+        .onChange((v: boolean) => multiTile.onShadowsToggle(v));
+    } else {
+      // Fallback without multiTile: simple angle + intensity
+      const sunParams = {
+        sunAngle: lighting.getSunAngleDegrees(),
+        sunIntensity: lighting.sunLight.intensity,
+      };
+      sunFolder
+        .add(sunParams, 'sunAngle', 0, 360, 1)
+        .name('Angle')
+        .onChange((v: number) => lighting.setSunAngle(v));
+      sunFolder
+        .add(sunParams, 'sunIntensity', 0, 5, 0.1)
+        .name('Intensity')
+        .onChange((v: number) => { lighting.sunLight.intensity = v; });
+    }
     sunFolder.open();
 
     // --- Toggle Photo / Adaptive (two interlocked checkboxes on the same line) ---
@@ -255,6 +306,76 @@ export class GuiControls {
   /** Called once features are loaded to populate the search dropdown */
   setFeatureNames(names: string[]): void {
     this.featureNames = names;
+  }
+
+  /** Build a datetime-local + "Now" button widget injected into the Sun folder */
+  private buildDateTimeWidget(sunFolder: GUI, multiTile: MultiTileCallbacks): HTMLDivElement {
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText =
+      'padding:0 8px 4px 8px;display:flex;align-items:center;gap:4px;';
+
+    const label = document.createElement('span');
+    label.textContent = 'Date';
+    label.style.cssText =
+      'flex-shrink:0;width:40%;color:#b8b8b8;font:11px "Segoe UI",sans-serif;';
+
+    const inputWrap = document.createElement('div');
+    inputWrap.style.cssText = 'flex:1;display:flex;gap:3px;min-width:0;align-items:center;';
+
+    const dtInput = document.createElement('input');
+    dtInput.type = 'datetime-local';
+    dtInput.step = '60'; // 1 minute precision
+    // Init to current local time
+    dtInput.value = this.toLocalDateTimeString(new Date());
+    dtInput.style.cssText =
+      'flex:1 1 auto;width:0;min-width:0;padding:3px 4px;background:#1a1a2e;color:#ddd;' +
+      'border:1px solid #444;border-radius:3px;font:10px "Segoe UI",sans-serif;' +
+      'outline:none;color-scheme:dark;';
+
+    const nowBtn = document.createElement('button');
+    nowBtn.textContent = '⟳';
+    nowBtn.title = 'Reset to current time';
+    nowBtn.style.cssText =
+      'flex:0 0 auto;width:20px;height:20px;padding:0;background:#333;color:#ddd;' +
+      'border:1px solid #555;border-radius:3px;font:13px sans-serif;cursor:pointer;' +
+      'line-height:20px;text-align:center;';
+    nowBtn.addEventListener('mouseenter', () => { nowBtn.style.background = '#444'; });
+    nowBtn.addEventListener('mouseleave', () => { nowBtn.style.background = '#333'; });
+
+    // 'input' fires immediately on every change (calendar click, hour spin, etc.)
+    dtInput.addEventListener('input', () => {
+      const date = new Date(dtInput.value);
+      if (!isNaN(date.getTime())) {
+        multiTile.onDateTimeChange(date);
+      }
+    });
+
+    nowBtn.addEventListener('click', () => {
+      const now = new Date();
+      dtInput.value = this.toLocalDateTimeString(now);
+      multiTile.onNowPressed(now);
+    });
+
+    inputWrap.appendChild(dtInput);
+    inputWrap.appendChild(nowBtn);
+    wrapper.appendChild(label);
+    wrapper.appendChild(inputWrap);
+
+    // Insert into the Sun folder's children container
+    const folderChildren = sunFolder.domElement.querySelector('.children') as HTMLElement;
+    if (folderChildren) folderChildren.appendChild(wrapper);
+
+    return wrapper;
+  }
+
+  /** Format a Date to "YYYY-MM-DDTHH:MM" for datetime-local input */
+  private toLocalDateTimeString(date: Date): string {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    const h = String(date.getHours()).padStart(2, '0');
+    const min = String(date.getMinutes()).padStart(2, '0');
+    return `${y}-${m}-${d}T${h}:${min}`;
   }
 
   private buildSearchWidget(multiTile: MultiTileCallbacks): HTMLDivElement {

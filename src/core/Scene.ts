@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { SPHERE_RADIUS, BG_COLOR } from '../utils/config';
+import { SPHERE_RADIUS } from '../utils/config';
 
 export class MoonScene {
   readonly renderer: THREE.WebGLRenderer;
@@ -24,7 +24,8 @@ export class MoonScene {
 
     // Scène
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(BG_COLOR);
+    // No solid background — the Starfield provides the backdrop
+    this.scene.background = null;
 
     // Caméra
     this.camera = new THREE.PerspectiveCamera(
