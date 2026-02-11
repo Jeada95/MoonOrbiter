@@ -222,8 +222,17 @@ let workshopGui: WorkshopGui | null = null;
 let workshopBrick: BrickResult | null = null;
 let workshopFeatureName = '';
 let workshopExaggeration = 5;
-let workshopMargin = 1.5;
 let workshopBaseThickness = 0.5; // km
+
+// Workshop zone bounds (degrees) — stored so we can expand/shrink per direction
+let wsLatMin = 0;
+let wsLatMax = 0;
+let wsLonMin = 0;
+let wsLonMax = 0;
+let wsCenterLat = 0; // needed for km↔deg conversion
+
+const MOON_RADIUS_KM = 1737.4;
+const KM_PER_DEG_LAT = (Math.PI * MOON_RADIUS_KM) / 180; // ~30.33 km/deg
 
 // DOM elements to hide/show
 const hudEl = document.getElementById('hud');
@@ -246,30 +255,21 @@ function hideLoading(): void {
   loadingOverlay.style.display = 'none';
 }
 
-/** Enter workshop mode: extract terrain around a named feature */
-async function enterWorkshop(featureName: string): Promise<void> {
-  const info = formations.getFeatureInfo(featureName);
-  if (!info) { console.warn('Feature not found:', featureName); return; }
+/** Compute current workshop zone size in km */
+function wsZoneSizeKm(): { nsKm: number; ewKm: number } {
+  const nsKm = (wsLatMax - wsLatMin) * KM_PER_DEG_LAT;
+  const cosLat = Math.cos(wsCenterLat * Math.PI / 180);
+  const ewKm = (wsLonMax - wsLonMin) * KM_PER_DEG_LAT * cosLat;
+  return { nsKm, ewKm };
+}
 
+/** Extract and build the workshop brick from current ws bounds */
+async function workshopExtractAndBuild(featureName: string, createGui: boolean): Promise<void> {
   showLoading(`Extracting terrain around ${featureName}...`);
 
   try {
-    // Compute extraction zone
-    const MOON_RADIUS_KM = 1737.4;
-    const KM_PER_DEG_LAT = (Math.PI * MOON_RADIUS_KM) / 180;
-    const cosLat = Math.cos(info.lat * Math.PI / 180);
-    const diamKm = info.diameter;
-    const halfExtentKm = (diamKm / 2) * workshopMargin;
-    const halfExtentLat = halfExtentKm / KM_PER_DEG_LAT;
-    const halfExtentLon = halfExtentKm / (KM_PER_DEG_LAT * cosLat);
-
-    const latMin = Math.max(-90, info.lat - halfExtentLat);
-    const latMax = Math.min(90, info.lat + halfExtentLat);
-    const lonMin = info.lon - halfExtentLon;
-    const lonMax = info.lon + halfExtentLon;
-
     // Extract LDEM region
-    const heightmap = await extractLDEMRegion(latMin, latMax, lonMin, lonMax, (msg) => {
+    const heightmap = await extractLDEMRegion(wsLatMin, wsLatMax, wsLonMin, wsLonMax, (msg) => {
       showLoading(`${featureName}: ${msg}`);
     });
 
@@ -290,61 +290,89 @@ async function enterWorkshop(featureName: string): Promise<void> {
     }
     workshopScene.setBrick(brick);
 
-    // Create workshop GUI
-    if (workshopGui) workshopGui.dispose();
-    workshopGui = new WorkshopGui(featureName, {
-      onMarginChange: (factor: number) => {
-        workshopMargin = factor;
-        // Re-extract with new margin
-        enterWorkshop(workshopFeatureName);
-      },
-      onExaggerationChange: (exag: number) => {
-        workshopExaggeration = exag;
-        if (workshopBrick && workshopScene) {
-          updateBrickExaggeration(workshopBrick, exag, workshopBaseThickness, workshopBrick.geometry);
-          workshopScene.updateGeometry(workshopBrick.geometry);
-        }
-      },
-      onLightAzimuthChange: (deg: number) => {
-        workshopScene?.setLightDirection(deg, workshopLightElevation);
-        workshopLightAzimuth = deg;
-      },
-      onLightElevationChange: (deg: number) => {
-        workshopScene?.setLightDirection(workshopLightAzimuth, deg);
-        workshopLightElevation = deg;
-      },
-      onWireframeChange: (enabled: boolean) => {
-        workshopScene?.setWireframe(enabled);
-      },
-      onExportSTL: () => {
-        if (!workshopScene) return;
-        const mesh = workshopScene.getBrickMesh();
-        if (!mesh) return;
-        const filename = makeSTLFilename(workshopFeatureName, workshopExaggeration);
-        exportMeshAsSTL(mesh, filename);
-      },
-      onBack: () => {
-        exitWorkshop();
-      },
-    });
+    const { nsKm, ewKm } = wsZoneSizeKm();
 
-    // Switch to workshop mode
-    workshopMode = true;
-    workshopScene.activate();
-    moonScene.controls.enabled = false;
+    if (createGui) {
+      // Create workshop GUI
+      if (workshopGui) workshopGui.dispose();
+      workshopGui = new WorkshopGui(featureName, nsKm, ewKm, {
+        onZoneExpand: (direction, stepKm) => {
+          const MIN_ZONE_KM = 20;
+          const degLat = stepKm / KM_PER_DEG_LAT;
+          const cosLat = Math.cos(wsCenterLat * Math.PI / 180);
+          const degLon = stepKm / (KM_PER_DEG_LAT * cosLat);
 
-    // Hide globe elements
-    globe.setVisible(false);
-    tileManager.setVisible(false);
-    starfield.setVisible(false);
-    graticule.setVisible(false);
-    formations.setVisible(false);
-    if (hudEl) hudEl.style.display = 'none';
-    if (titleEl) titleEl.style.display = 'none';
-    gui.hide();
+          if (direction === 'north') wsLatMax = Math.min(90, wsLatMax + degLat);
+          else if (direction === 'south') wsLatMin = Math.max(-90, wsLatMin - degLat);
+          else if (direction === 'east') wsLonMax += degLon;
+          else if (direction === 'west') wsLonMin -= degLon;
+
+          // Enforce minimum zone size
+          if ((wsLatMax - wsLatMin) * KM_PER_DEG_LAT < MIN_ZONE_KM) {
+            if (direction === 'north') wsLatMax = wsLatMin + MIN_ZONE_KM / KM_PER_DEG_LAT;
+            else if (direction === 'south') wsLatMin = wsLatMax - MIN_ZONE_KM / KM_PER_DEG_LAT;
+          }
+          const ewNow = (wsLonMax - wsLonMin) * KM_PER_DEG_LAT * cosLat;
+          if (ewNow < MIN_ZONE_KM) {
+            const minDeg = MIN_ZONE_KM / (KM_PER_DEG_LAT * cosLat);
+            if (direction === 'east') wsLonMax = wsLonMin + minDeg;
+            else if (direction === 'west') wsLonMin = wsLonMax - minDeg;
+          }
+
+          // Re-extract with new bounds (keep existing GUI)
+          workshopExtractAndBuild(workshopFeatureName, false).then(() => {
+            const size = wsZoneSizeKm();
+            workshopGui?.updateZoneSize(size.nsKm, size.ewKm);
+          });
+        },
+        onExaggerationChange: (exag: number) => {
+          workshopExaggeration = exag;
+          if (workshopBrick && workshopScene) {
+            updateBrickExaggeration(workshopBrick, exag, workshopBaseThickness, workshopBrick.geometry);
+            workshopScene.updateGeometry(workshopBrick.geometry);
+          }
+        },
+        onLightAzimuthChange: (deg: number) => {
+          workshopScene?.setLightDirection(deg, workshopLightElevation);
+          workshopLightAzimuth = deg;
+        },
+        onLightElevationChange: (deg: number) => {
+          workshopScene?.setLightDirection(workshopLightAzimuth, deg);
+          workshopLightElevation = deg;
+        },
+        onWireframeChange: (enabled: boolean) => {
+          workshopScene?.setWireframe(enabled);
+        },
+        onExportSTL: () => {
+          if (!workshopScene) return;
+          const mesh = workshopScene.getBrickMesh();
+          if (!mesh) return;
+          const filename = makeSTLFilename(workshopFeatureName, workshopExaggeration);
+          exportMeshAsSTL(mesh, filename);
+        },
+        onBack: () => {
+          exitWorkshop();
+        },
+      });
+
+      // Switch to workshop mode
+      workshopMode = true;
+      workshopScene.activate();
+      moonScene.controls.enabled = false;
+
+      // Hide globe elements
+      globe.setVisible(false);
+      tileManager.setVisible(false);
+      starfield.setVisible(false);
+      graticule.setVisible(false);
+      formations.setVisible(false);
+      if (hudEl) hudEl.style.display = 'none';
+      if (titleEl) titleEl.style.display = 'none';
+      gui.hide();
+    }
 
     hideLoading();
-    console.log(`Workshop mode: ${featureName} (${brick.cols}×${brick.rows}, ${brick.widthKm.toFixed(1)}×${brick.heightKm.toFixed(1)} km)`);
+    console.log(`Workshop mode: ${featureName} (${brick.cols}×${brick.rows}, ${nsKm.toFixed(0)}×${ewKm.toFixed(0)} km)`);
 
   } catch (err) {
     hideLoading();
@@ -355,6 +383,27 @@ async function enterWorkshop(featureName: string): Promise<void> {
 
 let workshopLightAzimuth = 45;
 let workshopLightElevation = 30;
+
+/** Enter workshop mode: compute initial zone and extract */
+async function enterWorkshop(featureName: string): Promise<void> {
+  const info = formations.getFeatureInfo(featureName);
+  if (!info) { console.warn('Feature not found:', featureName); return; }
+
+  // Compute initial extraction zone: 1.5× diameter around the feature
+  const INITIAL_MARGIN = 1.5;
+  wsCenterLat = info.lat;
+  const cosLat = Math.cos(info.lat * Math.PI / 180);
+  const halfExtentKm = (info.diameter / 2) * INITIAL_MARGIN;
+  const halfExtentLat = halfExtentKm / KM_PER_DEG_LAT;
+  const halfExtentLon = halfExtentKm / (KM_PER_DEG_LAT * cosLat);
+
+  wsLatMin = Math.max(-90, info.lat - halfExtentLat);
+  wsLatMax = Math.min(90, info.lat + halfExtentLat);
+  wsLonMin = info.lon - halfExtentLon;
+  wsLonMax = info.lon + halfExtentLon;
+
+  await workshopExtractAndBuild(featureName, true);
+}
 
 /** Exit workshop mode and return to globe */
 function exitWorkshop(): void {

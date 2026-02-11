@@ -386,7 +386,7 @@ export class GuiControls {
       'font:12px "Segoe UI",sans-serif;outline:none;';
 
     const listDiv = document.createElement('div');
-    listDiv.style.cssText = 'max-height:220px;overflow-y:auto;';
+    listDiv.style.cssText = 'max-height:400px;overflow-y:auto;';
 
     panel.appendChild(searchInput);
     panel.appendChild(listDiv);
@@ -399,6 +399,8 @@ export class GuiControls {
 
     let isOpen = false;
 
+    const MAX_VISIBLE_ITEMS = 80;
+
     const buildItems = (filter: string) => {
       listDiv.innerHTML = '';
       const lc = filter.toLowerCase();
@@ -406,7 +408,9 @@ export class GuiControls {
         ? this.featureNames.filter(n => n.toLowerCase().includes(lc))
         : this.featureNames;
 
-      for (const name of matches) {
+      const shown = matches.length > MAX_VISIBLE_ITEMS ? matches.slice(0, MAX_VISIBLE_ITEMS) : matches;
+
+      for (const name of shown) {
         const item = document.createElement('div');
         item.textContent = name;
         item.style.cssText =
@@ -426,6 +430,14 @@ export class GuiControls {
           multiTile.onSearchFeature(name);
         });
         listDiv.appendChild(item);
+      }
+
+      if (matches.length > MAX_VISIBLE_ITEMS) {
+        const more = document.createElement('div');
+        more.textContent = `… ${matches.length - MAX_VISIBLE_ITEMS} more — type to filter`;
+        more.style.cssText =
+          'padding:4px 6px;color:#888;font:italic 11px "Segoe UI",sans-serif;';
+        listDiv.appendChild(more);
       }
     };
 
