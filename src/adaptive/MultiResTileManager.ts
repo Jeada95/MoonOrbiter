@@ -85,7 +85,7 @@ export class MultiResTileManager {
     this.parent = parent;
 
     this.material = new THREE.MeshStandardMaterial({
-      color: 0xcccccc,
+      color: 0x888888,
       roughness: 0.95,
       metalness: 0.0,
       side: THREE.FrontSide,
@@ -315,6 +315,16 @@ export class MultiResTileManager {
   setTexture(texture: THREE.Texture): void {
     texture.colorSpace = THREE.SRGBColorSpace;
     this.material.map = texture;
+    this.material.needsUpdate = true;
+  }
+
+  setNormalMap(texture: THREE.Texture, scale = 1.0): void {
+    texture.colorSpace = THREE.LinearSRGBColorSpace;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    this.material.normalMap = texture;
+    this.material.normalMapType = THREE.TangentSpaceNormalMap;
+    this.material.normalScale = new THREE.Vector2(scale, scale);
     this.material.needsUpdate = true;
   }
 

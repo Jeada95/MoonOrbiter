@@ -8,6 +8,7 @@ import { MultiResTileManager } from './adaptive/MultiResTileManager';
 import { GraticuleOverlay } from './overlays/GraticuleOverlay';
 import { FormationsOverlay } from './overlays/FormationsOverlay';
 import { SPHERE_RADIUS } from './utils/config';
+import { initDataBaseUrl, getDataUrl } from './utils/data-paths';
 import { computeSunPosition, SunInfo } from './astro/SunPosition';
 import { computeEarthViewPosition } from './astro/EarthView';
 import { Starfield } from './scene/Starfield';
@@ -31,6 +32,9 @@ const globe = new Globe();
 globe.addToScene(moonScene.scene);
 
 
+// --- Resolve data base URL (Electron or Vite dev) ---
+await initDataBaseUrl();
+
 // --- Load data ---
 const textureLoader = new THREE.TextureLoader();
 
@@ -39,7 +43,7 @@ let lrocTexture: THREE.Texture | null = null;
 
 // 1) LROC color texture
 textureLoader.load(
-  '/moon-data/moon_texture_4k.jpg',
+  getDataUrl('/moon-data/moon_texture_4k.jpg'),
   (texture) => {
     lrocTexture = texture;
     globe.setTexture(texture);
@@ -50,7 +54,7 @@ textureLoader.load(
   (err) => {
     console.warn('4K texture failed, trying 2K...', err);
     textureLoader.load(
-      '/moon-data/moon_texture_2k.jpg',
+      getDataUrl('/moon-data/moon_texture_2k.jpg'),
       (texture) => {
         lrocTexture = texture;
         globe.setTexture(texture);
@@ -63,25 +67,31 @@ textureLoader.load(
   }
 );
 
-// 2) Normal map
+// 2) Normal map (applied to both Globe and TileManager for consistent shading)
 textureLoader.load(
-  '/moon-data/moon_normal_16ppd.png',
-  (normalTexture) => globe.setNormalMap(normalTexture, 1.5),
+  getDataUrl('/moon-data/moon_normal_16ppd.png'),
+  (normalTexture) => {
+    globe.setNormalMap(normalTexture, 1.5);
+    tileManager.setNormalMap(normalTexture, 1.5);
+  },
   undefined,
   () => {
     textureLoader.load(
-      '/moon-data/moon_normal_4ppd.png',
-      (normalTexture) => globe.setNormalMap(normalTexture, 1.5),
+      getDataUrl('/moon-data/moon_normal_4ppd.png'),
+      (normalTexture) => {
+        globe.setNormalMap(normalTexture, 1.5);
+        tileManager.setNormalMap(normalTexture, 1.5);
+      },
       undefined,
       () => {}
     );
   }
 );
 
-// 3) Elevation data — directly from NASA LDEM (Int16 LE, DN × 0.5 = meters)
-globe.loadLDEM('/moon-data/raw/LDEM_64.IMG', 23040, 11520, 0.5)
-  .then(() => console.log('LDEM 64ppd elevation applied'))
-  .catch((err) => console.error('LDEM loading error:', err));
+// 3) Elevation data — LOLA 4ppd (Float32, already in meters, 4 MB)
+globe.loadElevationBin(getDataUrl('/moon-data/lola_elevation_4ppd.bin'), 1440, 720)
+  .then(() => console.log('LOLA 4ppd elevation applied'))
+  .catch((err) => console.error('Elevation loading error:', err));
 
 // --- Multi-resolution adaptive tiling ---
 const tileManager = new MultiResTileManager(moonScene.scene);
@@ -92,7 +102,8 @@ const graticule = new GraticuleOverlay(moonScene.scene);
 
 // --- Lunar formations ---
 const formations = new FormationsOverlay();
-formations.loadData('/moon-data/lunar_features.json')
+formations.setWorkshopCallback((name: string) => enterWorkshop(name));
+formations.loadData(getDataUrl('/moon-data/lunar_features.json'))
   .then(() => {
     console.log('Lunar features loaded');
     gui.setFeatureNames(formations.getAllFeatureNames());
@@ -130,7 +141,7 @@ const gui = new GuiControls(lighting, globe, {
     adaptiveMode = enabled;
     globe.setVisible(!enabled);
     tileManager.setVisible(enabled);
-    hud.setResolutionInfo(enabled ? RES_HUD_INFO[currentAdaptiveRes] : 'LDEM 64ppd — Globe');
+    hud.setResolutionInfo(enabled ? RES_HUD_INFO[currentAdaptiveRes] : 'LOLA 4ppd — Globe');
     console.log(`Adaptive mode: ${enabled ? 'ON' : 'OFF'}`);
   },
   onResolutionChange: (resolution) => {
@@ -190,9 +201,6 @@ const gui = new GuiControls(lighting, globe, {
   },
   onClearSearch: () => {
     formations.highlightFeature(null);
-  },
-  onExtractForPrint: (name: string) => {
-    enterWorkshop(name);
   },
   onDateTimeChange: (date: Date) => {
     currentDateTime = date;
@@ -329,6 +337,13 @@ async function workshopExtractAndBuild(featureName: string, createGui: boolean):
           workshopExaggeration = exag;
           if (workshopBrick && workshopScene) {
             updateBrickExaggeration(workshopBrick, exag, workshopBaseThickness, workshopBrick.geometry);
+            workshopScene.updateGeometry(workshopBrick.geometry);
+          }
+        },
+        onBaseThicknessChange: (km: number) => {
+          workshopBaseThickness = km;
+          if (workshopBrick && workshopScene) {
+            updateBrickExaggeration(workshopBrick, workshopExaggeration, km, workshopBrick.geometry);
             workshopScene.updateGeometry(workshopBrick.geometry);
           }
         },

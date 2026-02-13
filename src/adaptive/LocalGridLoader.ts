@@ -1,5 +1,5 @@
 import type { HeightmapGrid } from './types';
-import { GRID_BASE_PATH, GRID_RESOLUTIONS } from '../utils/config';
+import { getGridBasePath, GRID_RESOLUTIONS } from '../utils/config';
 
 export type GridResolution = typeof GRID_RESOLUTIONS[number];
 
@@ -45,7 +45,7 @@ export class LocalGridLoader {
     }
 
     // Fetch depuis le serveur local
-    const url = `${GRID_BASE_PATH}/${resolution}/${tileName}.bin`;
+    const url = `${getGridBasePath()}/${resolution}/${tileName}.bin`;
     const response = await fetch(url);
     if (!response.ok) {
       throw new Error(`Erreur chargement grille ${url}: ${response.status}`);

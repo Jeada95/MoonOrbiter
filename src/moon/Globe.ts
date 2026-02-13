@@ -19,8 +19,8 @@ export class Globe {
   private geometry: THREE.SphereGeometry;
   private verticalExaggeration = DEFAULT_VERTICAL_EXAGGERATION;
 
-  /** Données LDEM brutes (Int16, DN values) */
-  private elevationData: Int16Array | null = null;
+  /** Données élévation (Int16 LDEM natif ou Float32 pré-converti) */
+  private elevationData: Int16Array | Float32Array | null = null;
   private elevWidth = 0;
   private elevHeight = 0;
   /** Facteur de conversion DN → mètres */
@@ -65,7 +65,7 @@ export class Globe {
 
   /**
    * Charge un fichier LDEM NASA (.IMG, Int16 Little-Endian) et déforme les vertices.
-   * @param url URL du fichier LDEM (ex: /moon-data/raw/LDEM_64.IMG)
+   * @param url URL du fichier LDEM (ex: /moon-data/LDEM_64.IMG)
    * @param width Largeur du grid (nb colonnes, ex: 23040 pour 64ppd)
    * @param height Hauteur du grid (nb lignes, ex: 11520 pour 64ppd)
    * @param scale Facteur DN → mètres (0.5 pour LDEM standard)
@@ -88,6 +88,40 @@ export class Globe {
     }
 
     console.log(`[Globe] LDEM chargé: ${this.elevationData.length} valeurs (${(buffer.byteLength / 1024 / 1024).toFixed(1)} MB)`);
+
+    // Sauvegarder les positions de base
+    const posAttr = this.geometry.getAttribute('position') as THREE.BufferAttribute;
+    this.basePositions = new Float32Array(posAttr.array);
+
+    // Appliquer la déformation
+    this.applyElevation();
+  }
+
+  /**
+   * Charge un fichier Float32 brut d'élévation (.bin, déjà en mètres) et déforme les vertices.
+   * Beaucoup plus léger que loadLDEM() — ex: lola_elevation_4ppd.bin = 4 MB vs LDEM_64.IMG = 530 MB.
+   * @param url URL du fichier .bin (ex: /moon-data/lola_elevation_4ppd.bin)
+   * @param width Largeur du grid (nb colonnes, ex: 1440 pour 4ppd)
+   * @param height Hauteur du grid (nb lignes, ex: 720 pour 4ppd)
+   */
+  async loadElevationBin(url: string, width: number, height: number): Promise<void> {
+    console.log(`[Globe] Chargement élévation Float32 ${width}x${height} depuis ${url}...`);
+
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Échec chargement ${url}: ${response.status}`);
+
+    const buffer = await response.arrayBuffer();
+    this.elevationData = new Float32Array(buffer);
+    this.elevWidth = width;
+    this.elevHeight = height;
+    this.elevScale = 1.0; // Données déjà en mètres
+
+    const expected = width * height;
+    if (this.elevationData.length !== expected) {
+      console.warn(`[Globe] Taille inattendue: ${this.elevationData.length} (attendu ${expected})`);
+    }
+
+    console.log(`[Globe] Élévation chargée: ${this.elevationData.length} valeurs (${(buffer.byteLength / 1024 / 1024).toFixed(1)} MB)`);
 
     // Sauvegarder les positions de base
     const posAttr = this.geometry.getAttribute('position') as THREE.BufferAttribute;

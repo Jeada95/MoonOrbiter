@@ -1,0 +1,46 @@
+appId: com.moonorbiter.app
+productName: MoonOrbiter
+copyright: Copyright (c) 2026
+
+directories:
+  output: release
+  buildResources: assets
+
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - electron/splash.html
+  - "!node_modules/sharp/**"
+  - "!node_modules/@img/**"
+  - "!scripts/**"
+  - "!**/*.ts"
+  - "!**/*.map"
+
+extraResources:
+  - from: node_modules/laz-perf/lib/web/laz-perf.wasm
+    to: wasm/laz-perf.wasm
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: assets/icon.ico
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: MoonOrbiter
+
+mac:
+  target:
+    - dmg
+  icon: assets/icon.png
+
+linux:
+  target:
+    - AppImage
+  icon: assets/icon.png

@@ -3,17 +3,27 @@
   "version": "0.1.0",
   "description": "Explorateur 3D interactif de la Lune basé sur les données LRO",
   "type": "module",
+  "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && npm run electron:compile && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron dist-electron/main.js\"",
+    "dev:web": "vite",
     "build": "tsc && vite build",
+    "electron:compile": "tsc -p electron/tsconfig.json && node scripts/write-cjs-marker.mjs",
+    "electron:build": "npm run electron:compile && vite build",
+    "dist": "npm run electron:build && electron-builder --win",
     "preview": "vite preview",
     "prepare-grids": "tsx scripts/prepare-grids.ts"
   },
   "devDependencies": {
     "@types/three": "^0.182.0",
+    "concurrently": "^9.2.1",
+    "cross-env": "^7.0.3",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
     "sharp": "^0.34.5",
     "typescript": "^5.7.0",
-    "vite": "^6.1.0"
+    "vite": "^6.1.0",
+    "wait-on": "^8.0.5"
   },
   "dependencies": {
     "astronomy-engine": "^2.1.19",

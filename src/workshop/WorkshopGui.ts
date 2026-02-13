@@ -12,6 +12,7 @@ export type ExpandDirection = 'north' | 'south' | 'east' | 'west';
 export interface WorkshopCallbacks {
   onZoneExpand: (direction: ExpandDirection, stepKm: number) => void;
   onExaggerationChange: (exag: number) => void;
+  onBaseThicknessChange: (km: number) => void;
   onLightAzimuthChange: (deg: number) => void;
   onLightElevationChange: (deg: number) => void;
   onWireframeChange: (enabled: boolean) => void;
@@ -36,6 +37,7 @@ export class WorkshopGui {
 
     const params = {
       exaggeration: 5,
+      baseThickness: 0.5,
       azimuth: 45,
       elevation: 30,
       wireframe: false,
@@ -47,6 +49,11 @@ export class WorkshopGui {
       .add(params, 'exaggeration', 1, 20, 0.5)
       .name('Exaggeration (x)')
       .onChange((v: number) => callbacks.onExaggerationChange(v));
+
+    this.gui
+      .add(params, 'baseThickness', 0.5, 20, 0.5)
+      .name('Base')
+      .onChange((v: number) => callbacks.onBaseThicknessChange(v));
 
     // Light folder
     const lightFolder = this.gui.addFolder('Light');

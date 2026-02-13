@@ -138,11 +138,91 @@ export class FormationsOverlay {
   private placedHW = new Float64Array(120);
   private placedHH = new Float64Array(120);
 
-  // ─── Optim: stable link click handler ──
-  private readonly _onLinkClick = (e: MouseEvent) => {
-    const url = (e.currentTarget as HTMLDivElement).dataset.infoUrl;
-    if (url) window.open(url, '_blank');
+  // ─── Reactive name click handler + context menu ──
+  private _contextMenu: HTMLDivElement | null = null;
+  private _onWorkshopRequest: ((featureName: string) => void) | null = null;
+
+  private readonly _onReactiveClick = (e: MouseEvent) => {
+    e.stopPropagation();
+    const el = e.currentTarget as HTMLDivElement;
+    const featureName = el.dataset.featureName;
+    const infoUrl = el.dataset.infoUrl;
+    if (!featureName) return;
+
+    // Remove any existing menu
+    this._closeContextMenu();
+
+    // Build context menu
+    const menu = document.createElement('div');
+    menu.style.cssText =
+      'position:fixed;z-index:10000;background:#1a1a2e;border:1px solid #555;' +
+      'border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,0.5);overflow:hidden;';
+    menu.style.left = `${e.clientX}px`;
+    menu.style.top = `${e.clientY}px`;
+
+    const itemStyle =
+      'padding:6px 14px;color:#ddd;font:12px "Segoe UI",sans-serif;cursor:pointer;' +
+      'white-space:nowrap;display:flex;align-items:center;gap:6px;';
+
+    // Option 1: Workshop
+    const workshopItem = document.createElement('div');
+    workshopItem.style.cssText = itemStyle;
+    workshopItem.innerHTML = '<span>🖨</span><span>3D Workshop</span>';
+    workshopItem.addEventListener('mouseenter', () => { workshopItem.style.background = '#333'; });
+    workshopItem.addEventListener('mouseleave', () => { workshopItem.style.background = ''; });
+    workshopItem.addEventListener('click', () => {
+      this._closeContextMenu();
+      if (this._onWorkshopRequest) this._onWorkshopRequest(featureName);
+    });
+    menu.appendChild(workshopItem);
+
+    // Option 2: Search web
+    const searchItem = document.createElement('div');
+    searchItem.style.cssText = itemStyle;
+    searchItem.innerHTML = '<span>🔍</span><span>Search web</span>';
+    searchItem.addEventListener('mouseenter', () => { searchItem.style.background = '#333'; });
+    searchItem.addEventListener('mouseleave', () => { searchItem.style.background = ''; });
+    searchItem.addEventListener('click', () => {
+      this._closeContextMenu();
+      const q = encodeURIComponent(`moon formation ${featureName}`);
+      window.open(`https://www.google.com/search?q=${q}`, '_blank');
+    });
+    menu.appendChild(searchItem);
+
+    // Option 3: USGS Gazetteer (if eligible)
+    if (infoUrl) {
+      const usgsItem = document.createElement('div');
+      usgsItem.style.cssText = itemStyle;
+      usgsItem.innerHTML = '<span>📋</span><span>USGS Gazetteer</span>';
+      usgsItem.addEventListener('mouseenter', () => { usgsItem.style.background = '#333'; });
+      usgsItem.addEventListener('mouseleave', () => { usgsItem.style.background = ''; });
+      usgsItem.addEventListener('click', () => {
+        this._closeContextMenu();
+        window.open(infoUrl, '_blank');
+      });
+      menu.appendChild(usgsItem);
+    }
+
+    document.body.appendChild(menu);
+    this._contextMenu = menu;
+
+    // Close on click outside (one-shot)
+    const closeHandler = (ev: MouseEvent) => {
+      if (!menu.contains(ev.target as Node)) {
+        this._closeContextMenu();
+        document.removeEventListener('mousedown', closeHandler);
+      }
+    };
+    // Delay to avoid closing immediately
+    setTimeout(() => document.addEventListener('mousedown', closeHandler), 0);
   };
+
+  private _closeContextMenu(): void {
+    if (this._contextMenu) {
+      this._contextMenu.remove();
+      this._contextMenu = null;
+    }
+  }
 
   // ─── Optim: camera dirty check ──
   private readonly _lastCamPos = new THREE.Vector3();
@@ -251,7 +331,13 @@ export class FormationsOverlay {
   setLinkMode(v: boolean): void {
     if (v === this.linkMode) return;
     this.linkMode = v;
+    this._closeContextMenu();
     this._dirty = true;
+  }
+
+  /** Register callback for workshop requests from the context menu */
+  setWorkshopCallback(cb: (featureName: string) => void): void {
+    this._onWorkshopRequest = cb;
   }
 
   // ─── Search API ────────────────────────────────────────────
@@ -359,18 +445,21 @@ export class FormationsOverlay {
     el.style.transform = 'translate(-50%,-50%)';
   }
 
-  private applyLink(el: HTMLDivElement, meta: FeatureMeta): void {
-    if (this.linkMode && meta.linkEligible) {
+  private applyLink(el: HTMLDivElement, meta: FeatureMeta, featureName: string): void {
+    if (this.linkMode) {
       el.style.textDecoration = 'underline';
       el.style.cursor = 'pointer';
       el.style.pointerEvents = 'auto';
-      el.dataset.infoUrl = meta.infoUrl;
-      el.onclick = this._onLinkClick;
+      el.dataset.featureName = featureName;
+      el.dataset.infoUrl = meta.linkEligible ? meta.infoUrl : '';
+      el.onclick = this._onReactiveClick;
     } else {
       el.style.textDecoration = 'none';
       el.style.cursor = '';
       el.style.pointerEvents = 'none';
       el.onclick = null;
+      delete el.dataset.featureName;
+      delete el.dataset.infoUrl;
     }
   }
 
@@ -468,11 +557,11 @@ export class FormationsOverlay {
         if (cat.poolFeatureIndex[used] !== fi) {
           el.textContent = feature.name;
           this.applyLabel(el, c as Category);
-          this.applyLink(el, this.allMeta[fi]);
+          this.applyLink(el, this.allMeta[fi], feature.name);
           cat.poolFeatureIndex[used] = fi;
           cat.poolLinkState[used] = this.linkMode;
         } else if (cat.poolLinkState[used] !== this.linkMode) {
-          this.applyLink(el, this.allMeta[fi]);
+          this.applyLink(el, this.allMeta[fi], feature.name);
           cat.poolLinkState[used] = this.linkMode;
         }
 
