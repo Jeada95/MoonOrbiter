@@ -10,9 +10,6 @@ export const SCALE_FACTOR = SPHERE_RADIUS / MOON_RADIUS;
 /** Rayon de référence lunaire en mètres (IAU 2015) */
 export const MOON_RADIUS_M = 1737400;
 
-/** Chemin vers les données sur le disque D */
-export const DATA_PATH = 'D:/MoonOrbiterData';
-
 /** Segments de la sphère pour la déformation LOLA (résolution géométrique du Globe) */
 export const SPHERE_SEGMENTS_DISPLACEMENT = 192;
 
@@ -30,8 +27,11 @@ export const MAX_VERTICAL_EXAGGERATION = 10;
 
 // --- Maillage adaptatif (grilles LDEM pré-calculées) ---
 
-/** Chemin de base des grilles via le middleware Vite */
-export const GRID_BASE_PATH = '/moon-data/grids';
+/** Chemin de base des grilles (résolu dynamiquement via data-paths.ts) */
+import { getDataUrl } from './data-paths';
+export function getGridBasePath(): string {
+  return getDataUrl('/moon-data/grids');
+}
 
 /**
  * Résolutions de grille disponibles (2^n + 1, contrainte RTIN).

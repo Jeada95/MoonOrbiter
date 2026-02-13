@@ -3,7 +3,7 @@ import path from 'path';
 
 export default defineConfig({
   server: {
-    open: true,
+    open: false,
     fs: {
       allow: ['..', 'D:/MoonOrbiterData'],
     },
@@ -18,7 +18,7 @@ export default defineConfig({
     // Le WASM est géré par le plugin serve-wasm ci-dessous.
   },
   build: {
-    target: 'es2020',
+    target: 'esnext',
   },
   plugins: [
     {

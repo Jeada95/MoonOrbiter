@@ -5,8 +5,9 @@
  * (46080×23040, Int16 LE, DN×0.5 = meters, row-major north→south, lon 0→360°).
  */
 
+import { getDataUrl } from '../utils/data-paths';
+
 // ─── Constants ──────────────────────────────────────────────────
-const LDEM128_URL = '/moon-data/raw/LDEM_128.IMG';
 const LDEM128_WIDTH = 46080;
 const LDEM128_HEIGHT = 23040;
 const LDEM128_SCALE = 0.5; // DN → meters
@@ -113,7 +114,7 @@ export async function extractLDEMRegion(
 
   log(`Fetching ${(fetchSize / 1024 / 1024).toFixed(1)} MB...`);
 
-  const response = await fetch(LDEM128_URL, {
+  const response = await fetch(getDataUrl('/moon-data/LDEM_128.IMG'), {
     headers: { Range: `bytes=${startByte}-${endByte}` },
   });
 
