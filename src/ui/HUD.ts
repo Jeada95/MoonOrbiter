@@ -1,7 +1,93 @@
 import * as THREE from 'three';
 import { SPHERE_RADIUS, MOON_RADIUS } from '../utils/config';
+import { type WidgetPosition, savePreferences, loadPreferences } from '../utils/preferences';
 
 const KM_TO_MI = 0.621371;
+
+// ─── Draggable widget helper ─────────────────────────────────────
+
+interface DragState {
+  el: HTMLElement;
+  prefKey: 'hudPosition' | 'scalebarPosition';
+  dragging: boolean;
+  offsetX: number;
+  offsetY: number;
+}
+
+/**
+ * Make an absolutely-positioned element draggable via mouse.
+ * When dragged, the element switches from its default CSS anchor
+ * (bottom/left or bottom/right) to top/left positioning.
+ */
+function makeDraggable(
+  el: HTMLElement,
+  prefKey: 'hudPosition' | 'scalebarPosition',
+  savedPos: WidgetPosition | null,
+): DragState {
+  const state: DragState = { el, prefKey, dragging: false, offsetX: 0, offsetY: 0 };
+
+  // Apply saved position (switch to top/left mode)
+  if (savedPos) {
+    applyPosition(el, savedPos);
+  }
+
+  el.addEventListener('mousedown', (e: MouseEvent) => {
+    // Only primary button
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Get current position on screen
+    const rect = el.getBoundingClientRect();
+    state.dragging = true;
+    state.offsetX = e.clientX - rect.left;
+    state.offsetY = e.clientY - rect.top;
+    el.classList.add('dragging');
+
+    const onMove = (ev: MouseEvent) => {
+      if (!state.dragging) return;
+      const x = clampX(ev.clientX - state.offsetX, el);
+      const y = clampY(ev.clientY - state.offsetY, el);
+      applyPosition(el, { x, y });
+    };
+
+    const onUp = () => {
+      if (!state.dragging) return;
+      state.dragging = false;
+      el.classList.remove('dragging');
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+
+      // Save position
+      const rect2 = el.getBoundingClientRect();
+      const pos: WidgetPosition = { x: rect2.left, y: rect2.top };
+      savePreferences({ [prefKey]: pos } as any);
+    };
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+
+  return state;
+}
+
+function applyPosition(el: HTMLElement, pos: WidgetPosition): void {
+  // Switch from default anchoring to top/left
+  el.style.top = `${pos.y}px`;
+  el.style.left = `${pos.x}px`;
+  el.style.bottom = 'auto';
+  el.style.right = 'auto';
+}
+
+function clampX(x: number, el: HTMLElement): number {
+  return Math.max(0, Math.min(x, window.innerWidth - el.offsetWidth));
+}
+
+function clampY(y: number, el: HTMLElement): number {
+  return Math.max(0, Math.min(y, window.innerHeight - el.offsetHeight));
+}
+
+// ─── HUD ─────────────────────────────────────────────────────────
 
 export class HUD {
   private elCoords: HTMLElement;
@@ -24,6 +110,10 @@ export class HUD {
   private lastRaycastTime = 0;
   private mouseDirty = false;
 
+  // Drag states
+  private hudDrag: DragState;
+  private scalebarDrag: DragState;
+
   constructor() {
     this.elCoords = document.getElementById('hud-coords')!;
     this.elAlt = document.getElementById('hud-alt')!;
@@ -36,9 +126,34 @@ export class HUD {
     this.elScaleMi = document.getElementById('scalebar-mi')!;
 
     window.addEventListener('mousemove', this.onMouseMove);
+
+    // Setup draggable widgets
+    const prefs = loadPreferences();
+    const hudEl = document.getElementById('hud')!;
+    const scalebarEl = document.getElementById('scalebar')!;
+    this.hudDrag = makeDraggable(hudEl, 'hudPosition', prefs.hudPosition);
+    this.scalebarDrag = makeDraggable(scalebarEl, 'scalebarPosition', prefs.scalebarPosition);
+
+    // Keep widgets in-bounds on resize
+    window.addEventListener('resize', this.onResize);
   }
 
+  private onResize = () => {
+    for (const drag of [this.hudDrag, this.scalebarDrag]) {
+      const el = drag.el;
+      // Only clamp if we have a custom position (top/left mode)
+      if (el.style.top && el.style.top !== 'auto') {
+        const rect = el.getBoundingClientRect();
+        const x = clampX(rect.left, el);
+        const y = clampY(rect.top, el);
+        applyPosition(el, { x, y });
+      }
+    }
+  };
+
   private onMouseMove = (e: MouseEvent) => {
+    // Don't update raycast mouse during widget drag
+    if (this.hudDrag.dragging || this.scalebarDrag.dragging) return;
     this.mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
     this.mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
     this.mouseDirty = true;
@@ -117,6 +232,26 @@ export class HUD {
     this.elScaleMi.textContent = fmtMi;
   }
 
+  /**
+   * Update only the scale bar from a Workshop-style camera
+   * where coordinates are directly in km (no sphere conversion needed).
+   */
+  updateScaleBarKm(camera: THREE.PerspectiveCamera, targetDist: number): void {
+    const BAR_PX = 65;
+    const fovRad = THREE.MathUtils.degToRad(camera.fov);
+    // Distance from camera to the target point (brick center)
+    const viewHeightKm = 2 * targetDist * Math.tan(fovRad / 2);
+    const kmPerPx = viewHeightKm / window.innerHeight;
+    const km = kmPerPx * BAR_PX;
+    const mi = km * KM_TO_MI;
+
+    const fmtKm = km >= 100 ? `${km.toFixed(0)} km` : km >= 10 ? `${km.toFixed(1)} km` : `${km.toFixed(2)} km`;
+    const fmtMi = mi >= 100 ? `${mi.toFixed(0)} mi` : mi >= 10 ? `${mi.toFixed(1)} mi` : `${mi.toFixed(2)} mi`;
+
+    this.elScaleKm.textContent = fmtKm;
+    this.elScaleMi.textContent = fmtMi;
+  }
+
   setResolutionInfo(text: string) {
     this.elResolution.textContent = text;
   }
@@ -134,5 +269,6 @@ export class HUD {
 
   dispose() {
     window.removeEventListener('mousemove', this.onMouseMove);
+    window.removeEventListener('resize', this.onResize);
   }
 }

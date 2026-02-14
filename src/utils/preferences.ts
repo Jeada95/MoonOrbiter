@@ -5,6 +5,11 @@
 
 const STORAGE_KEY = 'moonorbiter-prefs';
 
+export interface WidgetPosition {
+  x: number; // px from left
+  y: number; // px from top
+}
+
 export interface UserPreferences {
   // Globe
   mode: 'photo' | 'adaptive';
@@ -22,6 +27,9 @@ export interface UserPreferences {
   wsLightAzimuth: number;
   wsLightElevation: number;
   wsBaseThickness: number;
+  // Widget positions (null = default CSS position)
+  hudPosition: WidgetPosition | null;
+  scalebarPosition: WidgetPosition | null;
 }
 
 const DEFAULTS: UserPreferences = {
@@ -39,6 +47,8 @@ const DEFAULTS: UserPreferences = {
   wsLightAzimuth: 45,
   wsLightElevation: 30,
   wsBaseThickness: 0.5,
+  hudPosition: null,
+  scalebarPosition: null,
 };
 
 /** Charge les préférences depuis localStorage, merge avec les défauts */
