@@ -129,9 +129,9 @@ function applySunPosition(date: Date): SunInfo {
 
 // Resolution → HUD description
 const RES_HUD_INFO: Record<number, string> = {
-  513:  'LDEM 64ppd — ~889 m/px',
-  1025: 'LDEM 64ppd — ~444 m/px',
-  2049: 'LDEM 128ppd — ~222 m/px',
+  513:  'Adaptive — ~889 m/px',
+  1025: 'Adaptive — ~444 m/px',
+  2049: 'Adaptive — ~222 m/px',
 };
 let currentAdaptiveRes = 513;
 
@@ -143,14 +143,14 @@ const gui = new GuiControls(lighting, globe, {
     adaptiveMode = enabled;
     globe.setVisible(!enabled);
     tileManager.setVisible(enabled);
-    hud.setResolutionInfo(enabled ? RES_HUD_INFO[currentAdaptiveRes] : 'LOLA 4ppd — Globe');
+    hud.setResolutionInfo(enabled ? RES_HUD_INFO[currentAdaptiveRes] : 'Photo — LOLA 4ppd');
     console.log(`Adaptive mode: ${enabled ? 'ON' : 'OFF'}`);
   },
   onResolutionChange: (resolution) => {
     currentAdaptiveRes = resolution;
     tileManager.setResolution(resolution);
     if (adaptiveMode) {
-      hud.setResolutionInfo(RES_HUD_INFO[resolution] || `LDEM — ${resolution}px`);
+      hud.setResolutionInfo(RES_HUD_INFO[resolution] || `Adaptive — ${resolution}px`);
     }
     console.log(`Resolution: ${resolution}`);
   },
@@ -478,6 +478,11 @@ function animate(time: number) {
   if (workshopMode) {
     // Workshop render loop
     workshopScene?.render();
+    // Update scale bar with workshop camera (coordinates are in km)
+    if (workshopScene) {
+      const camDist = workshopScene.camera.position.distanceTo(workshopScene.controls.target);
+      hud.updateScaleBarKm(workshopScene.camera, camDist);
+    }
     return;
   }
 

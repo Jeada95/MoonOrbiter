@@ -11,9 +11,9 @@ import { type UserPreferences, savePreferences } from '../utils/preferences';
 
 /** Labels for each resolution level */
 const RES_LABELS: Record<number, string> = {
-  513: '1 — Low (~889 m/px)',
-  1025: '2 — Medium (~444 m/px)',
-  2049: '3 — High (~222 m/px)',
+  513: 'Low (~889 m/px)',
+  1025: 'Medium (~444 m/px)',
+  2049: 'High (~222 m/px)',
 };
 
 export interface MultiTileCallbacks {
