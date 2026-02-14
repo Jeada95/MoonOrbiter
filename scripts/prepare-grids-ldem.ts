@@ -34,14 +34,14 @@ interface LdemSource {
 
 const LDEM_SOURCES: LdemSource[] = [
   {
-    path: 'D:/MoonOrbiterData/raw/LDEM_64.IMG',
+    path: 'D:/MoonOrbiterData/LDEM_64.IMG',
     width: 23040,
     height: 11520,
     ppd: 64,
     resolutions: [513, 1025],
   },
   {
-    path: 'D:/MoonOrbiterData/raw/LDEM_128.IMG',
+    path: 'D:/MoonOrbiterData/LDEM_128.IMG',
     width: 46080,
     height: 23040,
     ppd: 128,
