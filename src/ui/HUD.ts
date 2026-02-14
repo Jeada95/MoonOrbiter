@@ -78,7 +78,7 @@ export class HUD {
         const point = intersects[0].point;
         const r = point.length();
         const lat = Math.asin(point.y / r) * (180 / Math.PI);
-        const lon = Math.atan2(point.z, point.x) * (180 / Math.PI);
+        const lon = Math.atan2(-point.z, point.x) * (180 / Math.PI);
 
         const lonNorm = ((lon % 360) + 360) % 360;
         const lonDisplay = lonNorm > 180 ? lonNorm - 360 : lonNorm;

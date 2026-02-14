@@ -36,10 +36,9 @@ export class Globe {
       segments
     );
 
-    // UV natifs de Three.js SphereGeometry conservés intacts (pas de miroir U)
-    // pour que les tangentes automatiques soient cohérentes avec la normal map.
-    // L'alignement texture LROC (lon croissant = U croissant) est fait via
-    // texture.repeat.x = -1 dans setTexture() / setNormalMap().
+    // Pas de miroir UV : la convention 3D (z = -cos(lat)*sin(lon)) aligne
+    // directement le phi natif de SphereGeometry avec les textures LROC/LDEM.
+    // lon=0° → +X → U=0.5 (centre texture), Est→droite, Ouest→gauche.
 
     this.material = new THREE.MeshStandardMaterial({
       color: 0x888888,
@@ -50,14 +49,11 @@ export class Globe {
     this.mesh = new THREE.Mesh(this.geometry, this.material);
   }
 
-  /** Applique une texture diffuse sur le globe (flippée en U pour aligner LROC) */
+  /** Applique une texture diffuse sur le globe */
   setTexture(texture: THREE.Texture) {
     // Cloner pour ne pas polluer l'objet partagé (TileManager utilise le même)
     const tex = texture.clone();
     tex.colorSpace = THREE.SRGBColorSpace;
-    tex.wrapS = THREE.RepeatWrapping;
-    tex.repeat.x = -1;
-    tex.offset.x = 1;
     this.material.map = tex;
     this.material.needsUpdate = true;
   }
@@ -157,14 +153,12 @@ export class Globe {
       const nz = bz / r;
 
       // Convertir en lat/lon
-      // Three.js SphereGeometry : Y = up, convention:
-      //   lat = asin(ny)  → -PI/2 (sud) à +PI/2 (nord)
-      //   lon = atan2(nz, nx) → -PI à +PI
+      // Convention 3D : z = -cos(lat)*sin(lon), donc lon = atan2(-nz, nx)
       const lat = Math.asin(ny); // radians, -PI/2..+PI/2
-      const lon = Math.atan2(nz, nx); // radians, -PI..+PI
+      const lon = Math.atan2(-nz, nx); // radians, -PI..+PI
 
       // Convertir lat/lon en coordonnées pixel dans le grid LOLA
-      // Three.js : atan2(nz,nx) = 0 → axe +X → centre texture UV = lon 0° (sub-Earth)
+      // Convention : atan2(-nz,nx) = 0 → axe +X → centre texture UV = lon 0° (sub-Earth)
       // LDEM NASA : col 0 = lon 0°E, col W/2 = lon 180°E. Range 0–360°.
       // Pas de décalage nécessaire : les deux conventions sont directement compatibles.
       const latDeg = lat * (180 / Math.PI); // -90..+90
@@ -245,9 +239,6 @@ export class Globe {
     tex.colorSpace = THREE.LinearSRGBColorSpace;
     tex.minFilter = THREE.LinearFilter;
     tex.magFilter = THREE.LinearFilter;
-    tex.wrapS = THREE.RepeatWrapping;
-    tex.repeat.x = -1;
-    tex.offset.x = 1;
 
     this.material.normalMap = tex;
     this.material.normalMapType = THREE.TangentSpaceNormalMap;

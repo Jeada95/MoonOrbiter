@@ -118,7 +118,7 @@ export class MultiResTileManager {
     return new THREE.Vector3(
       SPHERE_RADIUS * Math.cos(lat) * Math.cos(lon),
       SPHERE_RADIUS * Math.sin(lat),
-      SPHERE_RADIUS * Math.cos(lat) * Math.sin(lon),
+      -SPHERE_RADIUS * Math.cos(lat) * Math.sin(lon),
     );
   }
 

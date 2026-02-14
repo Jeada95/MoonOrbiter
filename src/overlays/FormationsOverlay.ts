@@ -66,7 +66,7 @@ function latLonToVec3(latDeg: number, lonDeg: number, r: number, out: THREE.Vect
   out.set(
     r * Math.cos(lat) * Math.cos(lon),
     r * Math.sin(lat),
-    r * Math.cos(lat) * Math.sin(lon),
+    -r * Math.cos(lat) * Math.sin(lon),
   );
 }
 
