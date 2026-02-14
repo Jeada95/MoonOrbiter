@@ -69,7 +69,7 @@ export default defineConfig({
             const contentType = mimeTypes[ext] || 'application/octet-stream';
             res.setHeader('Access-Control-Allow-Origin', '*');
 
-            // Support HTTP Range requests (needed for partial LDEM_128.IMG loading)
+            // Support HTTP Range requests for partial file loading
             const rangeHeader = req.headers.range;
             if (rangeHeader && rangeHeader.startsWith('bytes=')) {
               const stat = fs.statSync(filePath);

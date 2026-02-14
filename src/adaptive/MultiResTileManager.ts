@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { LocalGridLoader, GridResolution } from './LocalGridLoader';
 import { AdaptiveMesher, MartiniErrors } from './AdaptiveMesher';
-import { SPHERE_RADIUS, DEFAULT_MAX_ERROR, DEFAULT_VERTICAL_EXAGGERATION } from '../utils/config';
+import { SPHERE_RADIUS, DEFAULT_MAX_ERROR, DEFAULT_VERTICAL_EXAGGERATION, GRID_RESOLUTIONS } from '../utils/config';
 import type { HeightmapGrid } from './types';
 
 const DEG2RAD = Math.PI / 180;
@@ -21,6 +21,18 @@ function errorForDistance(dist: number): number {
   if (dist > 15) return 200;   // zoom moyen
   if (dist > 8) return 100;    // zoom modéré
   return 50;                    // gros plan
+}
+
+/**
+ * LOD automatique : adapte la résolution de chaque tuile selon la distance caméra.
+ * La résolution demandée par l'utilisateur sert de plafond.
+ * Distances en unités Three.js (SPHERE_RADIUS = 10).
+ */
+function resolutionForDistance(dist: number, maxRes: GridResolution): GridResolution {
+  // Seuils : dist > 25 → 513, dist > 16 → 1025, sinon → maxRes demandée
+  if (dist > 25) return 513 as GridResolution;
+  if (dist > 16 && maxRes > 513) return 1025 as GridResolution;
+  return maxRes;
 }
 
 interface ManagedTile {
@@ -67,6 +79,7 @@ export class MultiResTileManager {
     tile: ManagedTile;
     dist: number;
     wantedError: number;
+    tileRes: GridResolution;
     needsLoad: boolean;
     needsRebuild: boolean;
   }[] = [];
@@ -135,7 +148,7 @@ export class MultiResTileManager {
     this.frustum.setFromProjectionMatrix(this.projScreenMatrix);
 
     const cameraPos = camera.position;
-    const wantedRes = this.currentResolution;
+    const maxRes = this.currentResolution;
 
     // --- Phase 1 : calculer distance + visibilité, cacher les tuiles hors frustum ---
     const visibleWork = this._visibleWork;
@@ -165,11 +178,13 @@ export class MultiResTileManager {
 
       const dist = cameraPos.distanceTo(tile.center);
       const wantedError = errorForDistance(dist);
+      // LOD automatique : résolution adaptée à la distance
+      const tileRes = resolutionForDistance(dist, maxRes);
 
       let needsLoad = false;
       let needsRebuild = false;
 
-      if (!tile.cachedGrid || tile.cachedGridResolution !== wantedRes) {
+      if (!tile.cachedGrid || tile.cachedGridResolution !== tileRes) {
         needsLoad = !tile.loading;
       } else if (!tile.cachedMartini || !tile.mesh) {
         needsRebuild = true;
@@ -182,7 +197,7 @@ export class MultiResTileManager {
         }
       }
 
-      visibleWork.push({ tile, dist, wantedError, needsLoad, needsRebuild });
+      visibleWork.push({ tile, dist, wantedError, tileRes, needsLoad, needsRebuild });
     }
 
     // --- Phase 2 : trier par distance (plus proche en premier) ---
@@ -195,8 +210,8 @@ export class MultiResTileManager {
       if (loadsBudget <= 0) break;
       if (this.concurrentLoads >= MAX_CONCURRENT_LOADS) break;
 
-      work.tile.targetResolution = wantedRes;
-      this.loadTileGrid(work.tile, wantedRes);
+      work.tile.targetResolution = work.tileRes;
+      this.loadTileGrid(work.tile, work.tileRes);
       loadsBudget--;
     }
 

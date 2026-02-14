@@ -27,7 +27,7 @@ export interface DataServer {
 
 /**
  * Start a local HTTP server that serves moon data files from the given folder.
- * Supports HTTP Range requests for partial file loading (LDEM_128.IMG).
+ * Supports HTTP Range requests for partial file loading.
  * Listens on 127.0.0.1 only (no external access).
  */
 export function startDataServer(dataFolder: string): Promise<DataServer> {
