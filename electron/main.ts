@@ -64,9 +64,11 @@ function showSplash(): Promise<string> {
       resolve(folderPath);
     });
 
-    // IPC: open external link
+    // IPC: open external link (validate URL scheme for security)
     ipcMain.handle('splash-open-external', async (_event, url: string) => {
-      shell.openExternal(url);
+      if (url.startsWith('https://') || url.startsWith('http://')) {
+        shell.openExternal(url);
+      }
     });
 
     // If the splash window is closed without selecting, quit
@@ -96,6 +98,13 @@ function registerMainIpcHandlers(): void {
   ipcMain.handle('get-available-grids', () => availableGrids);
   ipcMain.handle('get-data-folder-path', () => config?.dataFolder || '');
   ipcMain.handle('get-version', () => app.getVersion());
+
+  // Secure external link opener (validate URL scheme)
+  ipcMain.handle('open-external', async (_event, url: string) => {
+    if (url.startsWith('https://') || url.startsWith('http://')) {
+      shell.openExternal(url);
+    }
+  });
 }
 
 async function createMainWindow(): Promise<void> {

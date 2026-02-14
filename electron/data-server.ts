@@ -39,22 +39,25 @@ export function startDataServer(dataFolder: string): Promise<DataServer> {
       // Resolve the file path
       const filePath = path.resolve(path.join(dataFolder, urlPath));
 
-      // Security: prevent directory traversal
-      const normalizedDataFolder = path.resolve(dataFolder);
+      // Security: prevent directory traversal (trailing sep avoids prefix collisions)
+      const normalizedDataFolder = path.resolve(dataFolder) + path.sep;
       if (!filePath.startsWith(normalizedDataFolder)) {
         res.writeHead(403, { 'Content-Type': 'text/plain' });
         res.end('Forbidden');
         return;
       }
 
-      // Check file exists
-      if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+      // Check file exists (single statSync instead of existsSync + statSync + statSync)
+      let stat: fs.Stats;
+      try {
+        stat = fs.statSync(filePath);
+        if (!stat.isFile()) throw new Error('not a file');
+      } catch {
         res.writeHead(404, { 'Content-Type': 'text/plain' });
         res.end('Not found');
         return;
       }
 
-      const stat = fs.statSync(filePath);
       const contentType = getMimeType(filePath);
 
       // CORS headers (same-origin fetch from Electron renderer)
@@ -65,10 +68,10 @@ export function startDataServer(dataFolder: string): Promise<DataServer> {
       const rangeHeader = req.headers.range;
       if (rangeHeader && rangeHeader.startsWith('bytes=')) {
         const parts = rangeHeader.replace('bytes=', '').split('-');
-        const start = parseInt(parts[0], 10);
-        const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
+        const start = parts[0] ? parseInt(parts[0], 10) : stat.size - parseInt(parts[1], 10);
+        const end = parts[0] && parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
 
-        if (start >= stat.size || end >= stat.size || start > end) {
+        if (isNaN(start) || isNaN(end) || start < 0 || start >= stat.size || end >= stat.size || start > end) {
           res.writeHead(416, {
             'Content-Range': `bytes */${stat.size}`,
           });
@@ -82,14 +85,26 @@ export function startDataServer(dataFolder: string): Promise<DataServer> {
           'Content-Length': chunkSize,
           'Content-Type': contentType,
         });
-        fs.createReadStream(filePath, { start, end }).pipe(res);
+        const stream = fs.createReadStream(filePath, { start, end });
+        stream.on('error', (err) => {
+          console.error('[data-server] Stream error:', err.message);
+          if (!res.headersSent) res.writeHead(500);
+          res.end();
+        });
+        stream.pipe(res);
       } else {
         // Full file response
         res.writeHead(200, {
           'Content-Type': contentType,
           'Content-Length': stat.size,
         });
-        fs.createReadStream(filePath).pipe(res);
+        const stream = fs.createReadStream(filePath);
+        stream.on('error', (err) => {
+          console.error('[data-server] Stream error:', err.message);
+          if (!res.headersSent) res.writeHead(500);
+          res.end();
+        });
+        stream.pipe(res);
       }
     });
 

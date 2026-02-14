@@ -6,7 +6,7 @@
  */
 
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { BrickResult } from './BrickMeshBuilder';
 
 const DEG2RAD = Math.PI / 180;

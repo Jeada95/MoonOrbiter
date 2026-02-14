@@ -55,7 +55,10 @@ export default defineConfig({
       name: 'serve-moon-data',
       configureServer(server) {
         server.middlewares.use('/moon-data', (req, res, next) => {
-          const filePath = path.join('D:/MoonOrbiterData', req.url || '');
+          const dataRoot = path.resolve('D:/MoonOrbiterData');
+          const filePath = path.resolve(path.join(dataRoot, req.url || ''));
+          // Security: prevent directory traversal
+          if (!filePath.startsWith(dataRoot + path.sep)) { next(); return; }
           const mimeTypes: Record<string, string> = {
             '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
             '.png': 'image/png', '.tif': 'image/tiff', '.tiff': 'image/tiff',

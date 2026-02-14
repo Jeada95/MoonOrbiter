@@ -40,6 +40,8 @@ export class GuiControls {
   private statsDisplay: any = null;
   private featureNames: string[] = [];
   private searchWrapper: HTMLDivElement | null = null;
+  private statsInterval = 0;
+  private outsideClickHandler: ((e: MouseEvent) => void) | null = null;
 
   constructor(lighting: Lighting, globe: Globe, multiTile: MultiTileCallbacks, prefs: UserPreferences) {
     this.gui = new GUI({ title: 'MoonOrbiter' });
@@ -272,7 +274,7 @@ export class GuiControls {
     }
 
     // Stats refresh
-    setInterval(() => {
+    this.statsInterval = window.setInterval(() => {
       const stats = multiTile.getStats();
       adaptiveParams.stats = `${stats.tiles} tiles | ${(stats.triangles / 1000).toFixed(0)}K △`;
       this.statsDisplay?.updateDisplay();
@@ -486,9 +488,10 @@ export class GuiControls {
     });
 
     // Close when clicking outside
-    document.addEventListener('mousedown', (e) => {
+    this.outsideClickHandler = (e: MouseEvent) => {
       if (isOpen && !toggleWrap.contains(e.target as Node)) closePanel();
-    });
+    };
+    document.addEventListener('mousedown', this.outsideClickHandler);
 
     return wrapper;
   }
@@ -504,6 +507,8 @@ export class GuiControls {
   }
 
   dispose() {
+    if (this.statsInterval) clearInterval(this.statsInterval);
+    if (this.outsideClickHandler) document.removeEventListener('mousedown', this.outsideClickHandler);
     this.gui.destroy();
   }
 }

@@ -132,10 +132,6 @@ export class HUD {
       `Sun: ${latSign}${lat.toFixed(1)}° (${latDir}) ${lonSign}${lon.toFixed(1)}° (${lonDir}) | ${utc}`;
   }
 
-  clearSunInfo(): void {
-    this.elSun.textContent = 'Sun: manual mode';
-  }
-
   dispose() {
     window.removeEventListener('mousemove', this.onMouseMove);
   }

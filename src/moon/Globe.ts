@@ -48,6 +48,7 @@ export class Globe {
 
   /** Applique une texture diffuse sur le globe */
   setTexture(texture: THREE.Texture) {
+    if (this.material.map) this.material.map.dispose();
     // Cloner pour ne pas polluer l'objet partagé (TileManager utilise le même)
     const tex = texture.clone();
     tex.colorSpace = THREE.SRGBColorSpace;
@@ -194,6 +195,7 @@ export class Globe {
    * Complémentaire à la déformation géométrique (qui donne le relief basse fréquence).
    */
   setNormalMap(texture: THREE.Texture, scale = 1.0) {
+    if (this.material.normalMap) this.material.normalMap.dispose();
     // Cloner pour ne pas polluer l'objet partagé (TileManager utilise le même)
     const tex = texture.clone();
     tex.colorSpace = THREE.LinearSRGBColorSpace;
