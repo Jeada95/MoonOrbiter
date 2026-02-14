@@ -9,8 +9,7 @@ import {
 /**
  * Globe lunaire dont les vertices sont déformés par les vraies altitudes LOLA.
  *
- * Charge directement un fichier LDEM NASA (.IMG, Int16 LE, row-major,
- * lat nord→sud, lon 0→360°). Altitude_m = DN × scale.
+ * Charge un fichier Float32 brut d'élévation (lola_elevation_4ppd.bin, 4 MB).
  * Chaque vertex est repositionné à la distance exacte du centre.
  */
 export class Globe {
@@ -19,12 +18,10 @@ export class Globe {
   private geometry: THREE.SphereGeometry;
   private verticalExaggeration = DEFAULT_VERTICAL_EXAGGERATION;
 
-  /** Données élévation (Int16 LDEM natif ou Float32 pré-converti) */
-  private elevationData: Int16Array | Float32Array | null = null;
+  /** Données élévation Float32 (déjà en mètres) */
+  private elevationData: Float32Array | null = null;
   private elevWidth = 0;
   private elevHeight = 0;
-  /** Facteur de conversion DN → mètres */
-  private elevScale = 0.5;
 
   /** Positions originales (rayon unitaire × SPHERE_RADIUS, sans élévation) */
   private basePositions: Float32Array | null = null;
@@ -37,7 +34,7 @@ export class Globe {
     );
 
     // Pas de miroir UV : la convention 3D (z = -cos(lat)*sin(lon)) aligne
-    // directement le phi natif de SphereGeometry avec les textures LROC/LDEM.
+    // directement le phi natif de SphereGeometry avec les textures LROC/LOLA.
     // lon=0° → +X → U=0.5 (centre texture), Est→droite, Ouest→gauche.
 
     this.material = new THREE.MeshStandardMaterial({
@@ -59,42 +56,7 @@ export class Globe {
   }
 
   /**
-   * Charge un fichier LDEM NASA (.IMG, Int16 Little-Endian) et déforme les vertices.
-   * @param url URL du fichier LDEM (ex: /moon-data/LDEM_64.IMG)
-   * @param width Largeur du grid (nb colonnes, ex: 23040 pour 64ppd)
-   * @param height Hauteur du grid (nb lignes, ex: 11520 pour 64ppd)
-   * @param scale Facteur DN → mètres (0.5 pour LDEM standard)
-   */
-  async loadLDEM(url: string, width: number, height: number, scale = 0.5): Promise<void> {
-    console.log(`[Globe] Chargement LDEM ${width}x${height} depuis ${url}...`);
-
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`Échec chargement ${url}: ${response.status}`);
-
-    const buffer = await response.arrayBuffer();
-    this.elevationData = new Int16Array(buffer);
-    this.elevWidth = width;
-    this.elevHeight = height;
-    this.elevScale = scale;
-
-    const expected = width * height;
-    if (this.elevationData.length !== expected) {
-      console.warn(`[Globe] Taille inattendue: ${this.elevationData.length} (attendu ${expected})`);
-    }
-
-    console.log(`[Globe] LDEM chargé: ${this.elevationData.length} valeurs (${(buffer.byteLength / 1024 / 1024).toFixed(1)} MB)`);
-
-    // Sauvegarder les positions de base
-    const posAttr = this.geometry.getAttribute('position') as THREE.BufferAttribute;
-    this.basePositions = new Float32Array(posAttr.array);
-
-    // Appliquer la déformation
-    this.applyElevation();
-  }
-
-  /**
    * Charge un fichier Float32 brut d'élévation (.bin, déjà en mètres) et déforme les vertices.
-   * Beaucoup plus léger que loadLDEM() — ex: lola_elevation_4ppd.bin = 4 MB vs LDEM_64.IMG = 530 MB.
    * @param url URL du fichier .bin (ex: /moon-data/lola_elevation_4ppd.bin)
    * @param width Largeur du grid (nb colonnes, ex: 1440 pour 4ppd)
    * @param height Hauteur du grid (nb lignes, ex: 720 pour 4ppd)
@@ -109,7 +71,6 @@ export class Globe {
     this.elevationData = new Float32Array(buffer);
     this.elevWidth = width;
     this.elevHeight = height;
-    this.elevScale = 1.0; // Données déjà en mètres
 
     const expected = width * height;
     if (this.elevationData.length !== expected) {
@@ -203,12 +164,11 @@ export class Globe {
     const dr = r - r0;
     const dc = c - c0;
 
-    // 4 voisins (DN Int16 → mètres via scale)
-    const s = this.elevScale;
-    const v00 = data[r0 * w + c0] * s;
-    const v01 = data[r0 * w + c1] * s;
-    const v10 = data[r1 * w + c0] * s;
-    const v11 = data[r1 * w + c1] * s;
+    // 4 voisins (déjà en mètres)
+    const v00 = data[r0 * w + c0];
+    const v01 = data[r0 * w + c1];
+    const v10 = data[r1 * w + c0];
+    const v11 = data[r1 * w + c1];
 
     // Interpolation bilinéaire
     return (
