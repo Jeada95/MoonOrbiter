@@ -36,16 +36,10 @@ export class Globe {
       segments
     );
 
-    // Three.js SphereGeometry génère des UV où U progresse en sens inverse
-    // de la longitude (phi va de 0 à 2PI depuis l'axe -X).
-    // Les textures NASA (LROC) ont lon croissant = U croissant.
-    // On mirore les U pour aligner la texture avec les coordonnées LDEM.
-    const uvAttr = this.geometry.getAttribute('uv') as THREE.BufferAttribute;
-    const uvs = uvAttr.array as Float32Array;
-    for (let i = 0; i < uvs.length; i += 2) {
-      uvs[i] = 1 - uvs[i];
-    }
-    uvAttr.needsUpdate = true;
+    // UV natifs de Three.js SphereGeometry conservés intacts (pas de miroir U)
+    // pour que les tangentes automatiques soient cohérentes avec la normal map.
+    // L'alignement texture LROC (lon croissant = U croissant) est fait via
+    // texture.repeat.x = -1 dans setTexture() / setNormalMap().
 
     this.material = new THREE.MeshStandardMaterial({
       color: 0x888888,
@@ -56,10 +50,15 @@ export class Globe {
     this.mesh = new THREE.Mesh(this.geometry, this.material);
   }
 
-  /** Applique une texture diffuse sur le globe */
+  /** Applique une texture diffuse sur le globe (flippée en U pour aligner LROC) */
   setTexture(texture: THREE.Texture) {
-    texture.colorSpace = THREE.SRGBColorSpace;
-    this.material.map = texture;
+    // Cloner pour ne pas polluer l'objet partagé (TileManager utilise le même)
+    const tex = texture.clone();
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.repeat.x = -1;
+    tex.offset.x = 1;
+    this.material.map = tex;
     this.material.needsUpdate = true;
   }
 
@@ -241,11 +240,16 @@ export class Globe {
    * Complémentaire à la déformation géométrique (qui donne le relief basse fréquence).
    */
   setNormalMap(texture: THREE.Texture, scale = 1.0) {
-    texture.colorSpace = THREE.LinearSRGBColorSpace;
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
+    // Cloner pour ne pas polluer l'objet partagé (TileManager utilise le même)
+    const tex = texture.clone();
+    tex.colorSpace = THREE.LinearSRGBColorSpace;
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.repeat.x = -1;
+    tex.offset.x = 1;
 
-    this.material.normalMap = texture;
+    this.material.normalMap = tex;
     this.material.normalMapType = THREE.TangentSpaceNormalMap;
     this.material.normalScale = new THREE.Vector2(scale, scale);
     this.material.needsUpdate = true;
