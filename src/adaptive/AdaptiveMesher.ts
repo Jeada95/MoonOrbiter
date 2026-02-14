@@ -19,12 +19,12 @@ function gridToCartesian(
   const lonRad = lon * DEG2RAD;
   const r = SPHERE_RADIUS * (1 + exaggeration * alt / MOON_RADIUS_M);
 
-  // Convention Three.js SphereGeometry (dérivée via phi = PI - lon) :
-  //   x = +r cos(lat) cos(lon)   y = r sin(lat)   z = r cos(lat) sin(lon)
+  // Convention MoonOrbiter (chiralité correcte, Est→droite vu de la Terre) :
+  //   x = r cos(lat) cos(lon)   y = r sin(lat)   z = -r cos(lat) sin(lon)
   return [
     r * Math.cos(latRad) * Math.cos(lonRad),
     r * Math.sin(latRad),
-    r * Math.cos(latRad) * Math.sin(lonRad),
+    -r * Math.cos(latRad) * Math.sin(lonRad),
   ];
 }
 
@@ -34,8 +34,8 @@ function gridToUV(
 ): [number, number] {
   const lon = grid.lonMin + (col / (grid.width - 1)) * (grid.lonMax - grid.lonMin);
   const lat = grid.latMax - (row / (grid.height - 1)) * (grid.latMax - grid.latMin);
-  // Globe UV miré (1-u) : U=0 → lon=-180°, U=0.5 → lon=0°, U=1 → lon=+180°.
-  // Pour nos tuiles (lon 0..360) : U = (lon/360 + 0.5) % 1
+  // UV natif SphereGeometry (sans miroir) : U=0.5 → lon=0°, U croissant → lon décroissant.
+  // Avec z=-sin(lon), le mapping natif aligne directement : U = (lon/360 + 0.5) % 1
   return [(lon / 360 + 0.5) % 1.0, (lat + 90) / 180];
 }
 
@@ -213,10 +213,10 @@ export class AdaptiveMesher {
         const [uc, vc] = gridToUV(cx, cy, grid);
         uvs[c * 2] = uc; uvs[c * 2 + 1] = vc;
 
-        // Winding order (a, c, b) pour normales vers l'extérieur
+        // Winding order (a, b, c) pour normales vers l'extérieur (avec z = -sin(lon))
         triIndices[triIdx++] = a;
-        triIndices[triIdx++] = c;
         triIndices[triIdx++] = b;
+        triIndices[triIdx++] = c;
       }
     }
     emitTriangles(0, 0, max, max, max, 0);

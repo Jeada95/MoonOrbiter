@@ -97,14 +97,13 @@ export function computeSunPosition(date: Date): SunInfo {
   const subSolarLon = Math.atan2(sy, sx) * RAD2DEG;
 
   // 9. Convert selenographic (lat, lon) to MoonOrbiter Three.js direction
-  //    Convention (same as latLonToVec3 in FormationsOverlay):
-  //    x = cos(lat) * cos(lon), y = sin(lat), z = cos(lat) * sin(lon)
+  //    Convention : x = cos(lat)*cos(lon), y = sin(lat), z = -cos(lat)*sin(lon)
   const latRad = subSolarLat * DEG2RAD;
   const lonRad = subSolarLon * DEG2RAD;
   const direction = new THREE.Vector3(
     Math.cos(latRad) * Math.cos(lonRad),
     Math.sin(latRad),
-    Math.cos(latRad) * Math.sin(lonRad),
+    -Math.cos(latRad) * Math.sin(lonRad),
   ).normalize();
 
   return { direction, subSolarLat, subSolarLon };

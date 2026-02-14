@@ -36,14 +36,14 @@ export function computeEarthViewPosition(date: Date): EarthViewInfo {
   const subEarthLon = lib.elon;
 
   // Convert selenographic (lat, lon) to MoonOrbiter Three.js direction
-  // Convention (same as SunPosition.ts / FormationsOverlay):
-  //   x = cos(lat) * cos(lon), y = sin(lat), z = cos(lat) * sin(lon)
+  // Convention : x = cos(lat)*cos(lon), y = sin(lat), z = -cos(lat)*sin(lon)
+  // Le signe négatif sur Z garantit Est→droite, Ouest→gauche vu depuis la Terre.
   const latRad = subEarthLat * DEG2RAD;
   const lonRad = subEarthLon * DEG2RAD;
   const direction = new THREE.Vector3(
     Math.cos(latRad) * Math.cos(lonRad),
     Math.sin(latRad),
-    Math.cos(latRad) * Math.sin(lonRad),
+    -Math.cos(latRad) * Math.sin(lonRad),
   ).normalize();
 
   return { direction, subEarthLat, subEarthLon };

@@ -13,7 +13,7 @@ export function latLonToCartesian(
   return new THREE.Vector3(
     radius * Math.cos(lat) * Math.cos(lon),
     radius * Math.sin(lat),
-    radius * Math.cos(lat) * Math.sin(lon)
+    -radius * Math.cos(lat) * Math.sin(lon)
   );
 }
 
@@ -23,6 +23,6 @@ export function cartesianToLatLon(
 ): { lat: number; lon: number } {
   const r = position.length();
   const lat = THREE.MathUtils.radToDeg(Math.asin(position.y / r));
-  const lon = THREE.MathUtils.radToDeg(Math.atan2(position.z, position.x));
+  const lon = THREE.MathUtils.radToDeg(Math.atan2(-position.z, position.x));
   return { lat, lon };
 }

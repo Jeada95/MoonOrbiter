@@ -33,7 +33,7 @@ function latLonToVec3(latDeg: number, lonDeg: number, r: number, out: THREE.Vect
   out.set(
     r * Math.cos(lat) * Math.cos(lon),
     r * Math.sin(lat),
-    r * Math.cos(lat) * Math.sin(lon),
+    -r * Math.cos(lat) * Math.sin(lon),
   );
 }
 
@@ -136,8 +136,8 @@ export class GraticuleOverlay {
         const lon0 = (i / ARC_SEGMENTS) * 360 * DEG2RAD;
         const lon1 = ((i + 1) / ARC_SEGMENTS) * 360 * DEG2RAD;
         latPositions.push(
-          r * cosLat * Math.cos(lon0), r * sinLat, r * cosLat * Math.sin(lon0),
-          r * cosLat * Math.cos(lon1), r * sinLat, r * cosLat * Math.sin(lon1),
+          r * cosLat * Math.cos(lon0), r * sinLat, -r * cosLat * Math.sin(lon0),
+          r * cosLat * Math.cos(lon1), r * sinLat, -r * cosLat * Math.sin(lon1),
         );
       }
     }
@@ -159,8 +159,8 @@ export class GraticuleOverlay {
         const lat0Rad = lat0 * DEG2RAD;
         const lat1Rad = lat1 * DEG2RAD;
         lonPositions.push(
-          r * Math.cos(lat0Rad) * cosLon, r * Math.sin(lat0Rad), r * Math.cos(lat0Rad) * sinLon,
-          r * Math.cos(lat1Rad) * cosLon, r * Math.sin(lat1Rad), r * Math.cos(lat1Rad) * sinLon,
+          r * Math.cos(lat0Rad) * cosLon, r * Math.sin(lat0Rad), -r * Math.cos(lat0Rad) * sinLon,
+          r * Math.cos(lat1Rad) * cosLon, r * Math.sin(lat1Rad), -r * Math.cos(lat1Rad) * sinLon,
         );
       }
     }
@@ -309,7 +309,7 @@ export class GraticuleOverlay {
     const tmp = this._tmpVec;
 
     // Méridien central pour placer les labels lat (snap sur lonStep)
-    const camLon = Math.atan2(cameraPos.z, cameraPos.x) * RAD2DEG;
+    const camLon = Math.atan2(-cameraPos.z, cameraPos.x) * RAD2DEG;
     const centralLon = Math.round(camLon / lonStep) * lonStep;
 
     // --- Labels de latitude : sur le méridien central, SOUS la ligne ---
