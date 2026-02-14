@@ -12,6 +12,7 @@ import { initDataBaseUrl, getDataUrl } from './utils/data-paths';
 import { computeSunPosition, SunInfo } from './astro/SunPosition';
 import { computeEarthViewPosition } from './astro/EarthView';
 import { Starfield } from './scene/Starfield';
+import { loadPreferences, savePreferences } from './utils/preferences';
 
 // Workshop mode imports
 import { extractLDEMRegion } from './workshop/LDEMRangeLoader';
@@ -71,16 +72,16 @@ textureLoader.load(
 textureLoader.load(
   getDataUrl('/moon-data/moon_normal_16ppd.png'),
   (normalTexture) => {
-    globe.setNormalMap(normalTexture, 1.5);
-    tileManager.setNormalMap(normalTexture, 1.5);
+    globe.setNormalMap(normalTexture, prefs.normalIntensity);
+    tileManager.setNormalMap(normalTexture, prefs.normalIntensity);
   },
   undefined,
   () => {
     textureLoader.load(
       getDataUrl('/moon-data/moon_normal_4ppd.png'),
       (normalTexture) => {
-        globe.setNormalMap(normalTexture, 1.5);
-        tileManager.setNormalMap(normalTexture, 1.5);
+        globe.setNormalMap(normalTexture, prefs.normalIntensity);
+        tileManager.setNormalMap(normalTexture, prefs.normalIntensity);
       },
       undefined,
       () => {}
@@ -135,6 +136,7 @@ const RES_HUD_INFO: Record<number, string> = {
 let currentAdaptiveRes = 513;
 
 // UI
+const prefs = loadPreferences();
 const hud = new HUD();
 const gui = new GuiControls(lighting, globe, {
   onToggleAdaptive: (enabled: boolean) => {
@@ -218,7 +220,7 @@ const gui = new GuiControls(lighting, globe, {
     tiles: tileManager.renderedTileCount,
     triangles: tileManager.totalTriangles,
   }),
-});
+}, prefs);
 
 // Set initial HUD sun info (after HUD is created)
 hud.setSunInfo(initialSun.subSolarLat, initialSun.subSolarLon, currentDateTime);
@@ -229,8 +231,8 @@ let workshopScene: WorkshopScene | null = null;
 let workshopGui: WorkshopGui | null = null;
 let workshopBrick: BrickResult | null = null;
 let workshopFeatureName = '';
-let workshopExaggeration = 5;
-let workshopBaseThickness = 0.5; // km
+let workshopExaggeration = prefs.adaptiveExaggeration;
+let workshopBaseThickness = prefs.wsBaseThickness;
 
 // Workshop zone bounds (degrees) — stored so we can expand/shrink per direction
 let wsLatMin = 0;
@@ -238,6 +240,8 @@ let wsLatMax = 0;
 let wsLonMin = 0;
 let wsLonMax = 0;
 let wsCenterLat = 0; // needed for km↔deg conversion
+let wsFormationsWasVisible = false;
+let wsGraticuleWasVisible = false;
 
 const MOON_RADIUS_KM = 1737.4;
 const KM_PER_DEG_LAT = (Math.PI * MOON_RADIUS_KM) / 180; // ~30.33 km/deg
@@ -342,6 +346,7 @@ async function workshopExtractAndBuild(featureName: string, createGui: boolean):
         },
         onBaseThicknessChange: (km: number) => {
           workshopBaseThickness = km;
+          savePreferences({ wsBaseThickness: km });
           if (workshopBrick && workshopScene) {
             updateBrickExaggeration(workshopBrick, workshopExaggeration, km, workshopBrick.geometry);
             workshopScene.updateGeometry(workshopBrick.geometry);
@@ -350,10 +355,12 @@ async function workshopExtractAndBuild(featureName: string, createGui: boolean):
         onLightAzimuthChange: (deg: number) => {
           workshopScene?.setLightDirection(deg, workshopLightElevation);
           workshopLightAzimuth = deg;
+          savePreferences({ wsLightAzimuth: deg });
         },
         onLightElevationChange: (deg: number) => {
           workshopScene?.setLightDirection(workshopLightAzimuth, deg);
           workshopLightElevation = deg;
+          savePreferences({ wsLightElevation: deg });
         },
         onWireframeChange: (enabled: boolean) => {
           workshopScene?.setWireframe(enabled);
@@ -368,6 +375,11 @@ async function workshopExtractAndBuild(featureName: string, createGui: boolean):
         onBack: () => {
           exitWorkshop();
         },
+      }, {
+        exaggeration: workshopExaggeration,
+        baseThickness: workshopBaseThickness,
+        azimuth: workshopLightAzimuth,
+        elevation: workshopLightElevation,
       });
 
       // Switch to workshop mode
@@ -379,6 +391,8 @@ async function workshopExtractAndBuild(featureName: string, createGui: boolean):
       globe.setVisible(false);
       tileManager.setVisible(false);
       starfield.setVisible(false);
+      wsGraticuleWasVisible = graticule.isVisible();
+      wsFormationsWasVisible = formations.isVisible();
       graticule.setVisible(false);
       formations.setVisible(false);
       if (hudEl) hudEl.style.display = 'none';
@@ -396,8 +410,8 @@ async function workshopExtractAndBuild(featureName: string, createGui: boolean):
   }
 }
 
-let workshopLightAzimuth = 45;
-let workshopLightElevation = 30;
+let workshopLightAzimuth = prefs.wsLightAzimuth;
+let workshopLightElevation = prefs.wsLightElevation;
 
 /** Enter workshop mode: compute initial zone and extract */
 async function enterWorkshop(featureName: string): Promise<void> {
@@ -448,8 +462,9 @@ function exitWorkshop(): void {
   if (titleEl) titleEl.style.display = '';
   gui.show();
 
-  // Note: graticule & formations visibility are controlled by their own toggles,
-  // so we don't force them back on — they'll be in whatever state the user left them.
+  // Restaurer l'état des overlays tel qu'il était avant l'entrée workshop
+  if (wsGraticuleWasVisible) graticule.setVisible(true);
+  if (wsFormationsWasVisible) formations.setVisible(true);
 
   console.log('Exited workshop mode');
 }
@@ -472,7 +487,7 @@ function animate(time: number) {
                   / (moonScene.controls.maxDistance - moonScene.controls.minDistance);
   const speedFactor = 0.05 + 0.95 * Math.max(0, Math.min(1, distRatio));
   moonScene.controls.rotateSpeed = 0.4 * speedFactor;
-  moonScene.controls.panSpeed = 0.4 * speedFactor;
+  moonScene.controls.panSpeed = 2.0 * speedFactor;
 
   // HUD update (raycast only against the globe mesh, not the entire scene)
   hud.update(moonScene.camera, [globe.mesh], time);

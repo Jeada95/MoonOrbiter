@@ -420,6 +420,8 @@ export class GraticuleOverlay {
     }
   }
 
+  isVisible(): boolean { return this.visible; }
+
   dispose(): void {
     this.parent.remove(this.group);
     if (this.latLines) { this.latLines.geometry.dispose(); }

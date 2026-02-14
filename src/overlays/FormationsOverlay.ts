@@ -319,6 +319,8 @@ export class FormationsOverlay {
     }
   }
 
+  isVisible(): boolean { return this.visible; }
+
   /** Set max visible count for a category: 0=Maria, 1=Craters, 2=Other */
   setCategoryCount(category: number, n: number): void {
     const cat = this.cats[category];
