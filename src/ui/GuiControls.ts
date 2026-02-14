@@ -4,10 +4,10 @@ import { Globe } from '../moon/Globe';
 import {
   MIN_VERTICAL_EXAGGERATION,
   MAX_VERTICAL_EXAGGERATION,
-  DEFAULT_VERTICAL_EXAGGERATION,
   GRID_RESOLUTIONS,
 } from '../utils/config';
 import type { GridResolution } from '../adaptive/LocalGridLoader';
+import { type UserPreferences, savePreferences } from '../utils/preferences';
 
 /** Labels for each resolution level */
 const RES_LABELS: Record<number, string> = {
@@ -41,7 +41,7 @@ export class GuiControls {
   private featureNames: string[] = [];
   private searchWrapper: HTMLDivElement | null = null;
 
-  constructor(lighting: Lighting, globe: Globe, multiTile: MultiTileCallbacks) {
+  constructor(lighting: Lighting, globe: Globe, multiTile: MultiTileCallbacks, prefs: UserPreferences) {
     this.gui = new GUI({ title: 'MoonOrbiter' });
 
     // --- Datetime picker (top-level, always visible) ---
@@ -51,18 +51,20 @@ export class GuiControls {
     const sunFolder = this.gui.addFolder('Sun');
 
     const sunParams = {
-      sunIntensity: lighting.sunLight.intensity,
+      sunIntensity: prefs.sunIntensity,
     };
+    lighting.sunLight.intensity = prefs.sunIntensity;
 
     sunFolder
       .add(sunParams, 'sunIntensity', 0, 5, 0.1)
       .name('Intensity')
-      .onChange((v: number) => { lighting.sunLight.intensity = v; });
+      .onChange((v: number) => { lighting.sunLight.intensity = v; savePreferences({ sunIntensity: v }); });
 
     sunFolder.open();
 
     // --- Toggle Photo / Adaptive (two interlocked checkboxes on the same line) ---
-    const modeParams = { photo: true, adaptive: false };
+    const isAdaptiveInit = prefs.mode === 'adaptive';
+    const modeParams = { photo: !isAdaptiveInit, adaptive: isAdaptiveInit };
 
     const photoCtrl = this.gui
       .add(modeParams, 'photo')
@@ -113,6 +115,7 @@ export class GuiControls {
     const applyMode = () => {
       const isAdaptive = modeParams.adaptive;
       multiTile.onToggleAdaptive(isAdaptive);
+      savePreferences({ mode: isAdaptive ? 'adaptive' : 'photo' });
       if (isAdaptive) {
         photoFolder.hide();
         adaptiveFolder.show();
@@ -125,19 +128,19 @@ export class GuiControls {
     };
 
     // --- Lat/lon grid checkbox ---
-    const overlayParams = { grille: false };
+    const overlayParams = { grille: prefs.graticule };
     this.gui
       .add(overlayParams, 'grille')
       .name('Lat/lon grid')
-      .onChange((v: boolean) => multiTile.onToggleGraticule(v));
+      .onChange((v: boolean) => { multiTile.onToggleGraticule(v); savePreferences({ graticule: v }); });
 
     // --- Formations checkbox + 3 category sliders + wiki ---
     const formationsParams = {
-      formations: false,
-      maria: 10,
-      craters: 10,
-      other: 10,
-      wiki: false,
+      formations: prefs.formations,
+      maria: prefs.mariaCount,
+      craters: prefs.cratersCount,
+      other: prefs.otherCount,
+      wiki: prefs.wiki,
     };
 
     const subCtrls: ReturnType<GUI['add']>[] = [];
@@ -147,6 +150,7 @@ export class GuiControls {
       .name('Formations')
       .onChange((v: boolean) => {
         multiTile.onToggleFormations(v);
+        savePreferences({ formations: v });
         for (const ctrl of subCtrls) v ? ctrl.show() : ctrl.hide();
         if (this.searchWrapper) this.searchWrapper.style.display = v ? '' : 'none';
       });
@@ -154,29 +158,29 @@ export class GuiControls {
     const mariaCtrl = this.gui
       .add(formationsParams, 'maria', 1, 20, 1)
       .name('Maria')
-      .onChange((v: number) => multiTile.onMariaCountChange(v));
-    mariaCtrl.hide();
+      .onChange((v: number) => { multiTile.onMariaCountChange(v); savePreferences({ mariaCount: v }); });
+    if (!prefs.formations) mariaCtrl.hide();
     subCtrls.push(mariaCtrl);
 
     const cratersCtrl = this.gui
       .add(formationsParams, 'craters', 1, 50, 1)
       .name('Craters')
-      .onChange((v: number) => multiTile.onCratersCountChange(v));
-    cratersCtrl.hide();
+      .onChange((v: number) => { multiTile.onCratersCountChange(v); savePreferences({ cratersCount: v }); });
+    if (!prefs.formations) cratersCtrl.hide();
     subCtrls.push(cratersCtrl);
 
     const otherCtrl = this.gui
       .add(formationsParams, 'other', 1, 50, 1)
       .name('Other')
-      .onChange((v: number) => multiTile.onOtherCountChange(v));
-    otherCtrl.hide();
+      .onChange((v: number) => { multiTile.onOtherCountChange(v); savePreferences({ otherCount: v }); });
+    if (!prefs.formations) otherCtrl.hide();
     subCtrls.push(otherCtrl);
 
     const wikiCtrl = this.gui
       .add(formationsParams, 'wiki')
       .name('Reactive names')
-      .onChange((v: boolean) => multiTile.onToggleWiki(v));
-    wikiCtrl.hide();
+      .onChange((v: boolean) => { multiTile.onToggleWiki(v); savePreferences({ wiki: v }); });
+    if (!prefs.formations) wikiCtrl.hide();
     subCtrls.push(wikiCtrl);
 
     // --- Search dropdown (custom DOM widget) ---
@@ -184,24 +188,24 @@ export class GuiControls {
     // Insert into the lil-gui children list (after wikiCtrl)
     const guiChildren = this.gui.domElement.querySelector('.children') as HTMLElement;
     if (guiChildren) guiChildren.appendChild(this.searchWrapper);
-    this.searchWrapper.style.display = 'none'; // hidden by default (Formations off)
+    this.searchWrapper.style.display = prefs.formations ? '' : 'none';
 
     // --- Photo folder ---
     const photoParams = {
-      normalIntensity: globe.getNormalScale(),
+      normalIntensity: prefs.normalIntensity,
     };
 
     const photoFolder = this.gui.addFolder('Photo');
     photoFolder
       .add(photoParams, 'normalIntensity', 0, 5, 0.1)
       .name('Relief (normals)')
-      .onChange((v: number) => globe.setNormalScale(v));
+      .onChange((v: number) => { globe.setNormalScale(v); savePreferences({ normalIntensity: v }); });
     photoFolder.open();
 
     // --- Adaptive folder ---
     const adaptiveParams = {
-      resolutionLevel: 1,
-      exaggeration: DEFAULT_VERTICAL_EXAGGERATION,
+      resolutionLevel: prefs.adaptiveResolution,
+      exaggeration: prefs.adaptiveExaggeration,
       wireframe: false,
       stats: '0 tiles | 0 △',
     };
@@ -215,9 +219,11 @@ export class GuiControls {
         const res = GRID_RESOLUTIONS[v - 1] as GridResolution;
         multiTile.onResolutionChange(res);
         resLabelCtrl.setValue(RES_LABELS[res] || String(res));
+        savePreferences({ adaptiveResolution: v });
       });
 
-    const resLabelObj = { label: RES_LABELS[GRID_RESOLUTIONS[0]] };
+    const initRes = GRID_RESOLUTIONS[prefs.adaptiveResolution - 1] ?? GRID_RESOLUTIONS[0];
+    const resLabelObj = { label: RES_LABELS[initRes] || String(initRes) };
     const resLabelCtrl = adaptiveFolder
       .add(resLabelObj, 'label')
       .name('Detail')
@@ -226,7 +232,7 @@ export class GuiControls {
     adaptiveFolder
       .add(adaptiveParams, 'exaggeration', MIN_VERTICAL_EXAGGERATION, MAX_VERTICAL_EXAGGERATION, 0.5)
       .name('Exaggeration (x)')
-      .onChange((v: number) => multiTile.onExaggerationChange(v));
+      .onChange((v: number) => { multiTile.onExaggerationChange(v); savePreferences({ adaptiveExaggeration: v }); });
     adaptiveFolder
       .add(adaptiveParams, 'wireframe')
       .name('Wireframe')
@@ -237,8 +243,32 @@ export class GuiControls {
       .name('Stats')
       .disable();
 
-    // Hidden by default (start in Photo mode)
-    adaptiveFolder.hide();
+    // Apply initial mode visibility
+    if (isAdaptiveInit) {
+      photoFolder.hide();
+      adaptiveFolder.show();
+      adaptiveFolder.open();
+    } else {
+      adaptiveFolder.hide();
+    }
+
+    // Fire initial state so main.ts sets up correctly
+    if (isAdaptiveInit) multiTile.onToggleAdaptive(true);
+    if (prefs.graticule) multiTile.onToggleGraticule(true);
+    if (prefs.formations) {
+      multiTile.onToggleFormations(true);
+      multiTile.onMariaCountChange(prefs.mariaCount);
+      multiTile.onCratersCountChange(prefs.cratersCount);
+      multiTile.onOtherCountChange(prefs.otherCount);
+      if (prefs.wiki) multiTile.onToggleWiki(true);
+    }
+    if (prefs.adaptiveResolution > 1) {
+      const res = GRID_RESOLUTIONS[prefs.adaptiveResolution - 1] as GridResolution;
+      multiTile.onResolutionChange(res);
+    }
+    if (prefs.adaptiveExaggeration !== 1.0) {
+      multiTile.onExaggerationChange(prefs.adaptiveExaggeration);
+    }
 
     // Stats refresh
     setInterval(() => {

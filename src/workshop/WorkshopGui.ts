@@ -20,6 +20,13 @@ export interface WorkshopCallbacks {
   onBack: () => void;
 }
 
+export interface WorkshopInitialParams {
+  exaggeration: number;
+  baseThickness: number;
+  azimuth: number;
+  elevation: number;
+}
+
 export class WorkshopGui {
   private gui: GUI;
   private sizeLabel: HTMLSpanElement | null = null;
@@ -29,6 +36,7 @@ export class WorkshopGui {
     initialNS_km: number,
     initialEW_km: number,
     callbacks: WorkshopCallbacks,
+    initial: WorkshopInitialParams,
   ) {
     this.gui = new GUI({ title: `Workshop: ${featureName}` });
 
@@ -36,10 +44,10 @@ export class WorkshopGui {
     this.buildZonePad(initialNS_km, initialEW_km, callbacks);
 
     const params = {
-      exaggeration: 5,
-      baseThickness: 0.5,
-      azimuth: 45,
-      elevation: 30,
+      exaggeration: initial.exaggeration,
+      baseThickness: initial.baseThickness,
+      azimuth: initial.azimuth,
+      elevation: initial.elevation,
       wireframe: false,
       exportSTL: () => callbacks.onExportSTL(),
       back: () => callbacks.onBack(),
