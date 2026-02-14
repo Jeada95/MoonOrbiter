@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { SPHERE_RADIUS } from '../utils/config';
+import { openExternalUrl } from '../utils/data-paths';
+import { latLonToVec3 } from '../utils/coordinates';
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -59,16 +61,6 @@ const CAT_STYLES: Record<Category, {
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────
-
-function latLonToVec3(latDeg: number, lonDeg: number, r: number, out: THREE.Vector3): void {
-  const lat = latDeg * DEG2RAD;
-  const lon = lonDeg * DEG2RAD;
-  out.set(
-    r * Math.cos(lat) * Math.cos(lon),
-    r * Math.sin(lat),
-    -r * Math.cos(lat) * Math.sin(lon),
-  );
-}
 
 function makeInfoUrl(feature: LunarFeature): string {
   return `https://planetarynames.wr.usgs.gov/Feature/${feature.id}`;
@@ -185,7 +177,7 @@ export class FormationsOverlay {
     searchItem.addEventListener('click', () => {
       this._closeContextMenu();
       const q = encodeURIComponent(`moon formation ${featureName}`);
-      window.open(`https://www.google.com/search?q=${q}`, '_blank');
+      openExternalUrl(`https://www.google.com/search?q=${q}`);
     });
     menu.appendChild(searchItem);
 
@@ -198,7 +190,7 @@ export class FormationsOverlay {
       usgsItem.addEventListener('mouseleave', () => { usgsItem.style.background = ''; });
       usgsItem.addEventListener('click', () => {
         this._closeContextMenu();
-        window.open(infoUrl, '_blank');
+        openExternalUrl(infoUrl);
       });
       menu.appendChild(usgsItem);
     }

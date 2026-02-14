@@ -15,23 +15,35 @@ const REBUILD_BUDGET_PER_FRAME = 6;
 /** Nombre max de tuiles chargées simultanément en fetch réseau */
 const LOAD_BUDGET_PER_FRAME = 4;
 
+// ─── LOD distances (en unités Three.js, SPHERE_RADIUS = 10) ─────
+// Surface de la sphère = rayon 10, caméra Earth-view ≈ 35 unités du centre
+
+/** Au-delà : vue globale, gros triangles suffisent */
+const DIST_GLOBAL_VIEW = 30;
+/** Vue intermédiaire */
+const DIST_MEDIUM_ZOOM = 15;
+/** Zoom modéré */
+const DIST_CLOSE_ZOOM = 8;
+/** LOD résolution : au-delà → 513 (basse) */
+const DIST_LOD_LOW = 25;
+/** LOD résolution : au-delà → 1025 (moyenne) */
+const DIST_LOD_MEDIUM = 16;
+
 // maxError adapté à la distance caméra (en mètres d'altitude)
 function errorForDistance(dist: number): number {
-  if (dist > 30) return 500;   // vue globale : gros triangles
-  if (dist > 15) return 200;   // zoom moyen
-  if (dist > 8) return 100;    // zoom modéré
-  return 50;                    // gros plan
+  if (dist > DIST_GLOBAL_VIEW) return 500;
+  if (dist > DIST_MEDIUM_ZOOM) return 200;
+  if (dist > DIST_CLOSE_ZOOM) return 100;
+  return 50;
 }
 
 /**
  * LOD automatique : adapte la résolution de chaque tuile selon la distance caméra.
  * La résolution demandée par l'utilisateur sert de plafond.
- * Distances en unités Three.js (SPHERE_RADIUS = 10).
  */
 function resolutionForDistance(dist: number, maxRes: GridResolution): GridResolution {
-  // Seuils : dist > 25 → 513, dist > 16 → 1025, sinon → maxRes demandée
-  if (dist > 25) return 513 as GridResolution;
-  if (dist > 16 && maxRes > 513) return 1025 as GridResolution;
+  if (dist > DIST_LOD_LOW) return 513 as GridResolution;
+  if (dist > DIST_LOD_MEDIUM && maxRes > 513) return 1025 as GridResolution;
   return maxRes;
 }
 
@@ -328,16 +340,20 @@ export class MultiResTileManager {
   }
 
   setTexture(texture: THREE.Texture): void {
-    texture.colorSpace = THREE.SRGBColorSpace;
-    this.material.map = texture;
+    if (this.material.map) this.material.map.dispose();
+    const tex = texture.clone();
+    tex.colorSpace = THREE.SRGBColorSpace;
+    this.material.map = tex;
     this.material.needsUpdate = true;
   }
 
   setNormalMap(texture: THREE.Texture, scale = 1.0): void {
-    texture.colorSpace = THREE.LinearSRGBColorSpace;
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    this.material.normalMap = texture;
+    if (this.material.normalMap) this.material.normalMap.dispose();
+    const tex = texture.clone();
+    tex.colorSpace = THREE.LinearSRGBColorSpace;
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    this.material.normalMap = tex;
     this.material.normalMapType = THREE.TangentSpaceNormalMap;
     this.material.normalScale = new THREE.Vector2(scale, scale);
     this.material.needsUpdate = true;

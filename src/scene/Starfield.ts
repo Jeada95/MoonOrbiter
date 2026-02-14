@@ -9,7 +9,7 @@
 import * as THREE from 'three';
 
 const STAR_COUNT = 8000;
-const SPHERE_RADIUS = 500;
+const STARFIELD_RADIUS = 500;
 
 /**
  * Seeded pseudo-random number generator (mulberry32).
@@ -49,9 +49,9 @@ export class Starfield {
       const y = 2 * v * f;
       const z = 1 - 2 * s;
 
-      positions[i * 3] = x * SPHERE_RADIUS;
-      positions[i * 3 + 1] = y * SPHERE_RADIUS;
-      positions[i * 3 + 2] = z * SPHERE_RADIUS;
+      positions[i * 3] = x * STARFIELD_RADIUS;
+      positions[i * 3 + 1] = y * STARFIELD_RADIUS;
+      positions[i * 3 + 2] = z * STARFIELD_RADIUS;
 
       // Brightness: power-law distribution (most dim, few bright)
       const brightness = Math.pow(rng(), 2.5) * 0.7 + 0.3; // range 0.3 → 1.0

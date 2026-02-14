@@ -1,19 +1,32 @@
 import * as THREE from 'three';
 import { SPHERE_RADIUS } from './config';
 
+const DEG2RAD = Math.PI / 180;
+
 /** Convertit latitude/longitude (degrés) en position 3D sur la sphère */
 export function latLonToCartesian(
   latDeg: number,
   lonDeg: number,
   radius: number = SPHERE_RADIUS
 ): THREE.Vector3 {
-  const lat = THREE.MathUtils.degToRad(latDeg);
-  const lon = THREE.MathUtils.degToRad(lonDeg);
+  const lat = latDeg * DEG2RAD;
+  const lon = lonDeg * DEG2RAD;
 
   return new THREE.Vector3(
     radius * Math.cos(lat) * Math.cos(lon),
     radius * Math.sin(lat),
     -radius * Math.cos(lat) * Math.sin(lon)
+  );
+}
+
+/** Même conversion mais écrit dans un Vector3 existant (zero-alloc) */
+export function latLonToVec3(latDeg: number, lonDeg: number, r: number, out: THREE.Vector3): void {
+  const lat = latDeg * DEG2RAD;
+  const lon = lonDeg * DEG2RAD;
+  out.set(
+    r * Math.cos(lat) * Math.cos(lon),
+    r * Math.sin(lat),
+    -r * Math.cos(lat) * Math.sin(lon),
   );
 }
 

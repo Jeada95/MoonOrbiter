@@ -33,3 +33,17 @@ export function getDataUrl(relativePath: string): string {
   }
   return relativePath;
 }
+
+/**
+ * Open an external URL safely.
+ * In Electron: uses IPC to main process (validated scheme).
+ * In browser: uses window.open.
+ */
+export function openExternalUrl(url: string): void {
+  const api = (window as any).moonOrbiterElectron;
+  if (api?.openExternal) {
+    api.openExternal(url);
+  } else {
+    window.open(url, '_blank');
+  }
+}

@@ -22,7 +22,6 @@ export function loadConfig(): AppConfig | null {
       return null;
     }
     const raw = fs.readFileSync(configPath, 'utf-8');
-    console.log('[config] Raw config:', raw.trim());
     const config = JSON.parse(raw) as AppConfig;
     // Validate that the data folder still exists
     if (config.dataFolder && fs.existsSync(config.dataFolder)) {

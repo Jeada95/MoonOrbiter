@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { SPHERE_RADIUS } from '../utils/config';
+import { latLonToVec3 } from '../utils/coordinates';
 
 const DEG2RAD = Math.PI / 180;
 const RAD2DEG = 180 / Math.PI;
@@ -26,16 +27,6 @@ const LON_COLOR_CSS = '#e89040';
 
 /** Max de lignes visibles par axe */
 const MAX_VISIBLE_LINES = 10;
-
-function latLonToVec3(latDeg: number, lonDeg: number, r: number, out: THREE.Vector3): void {
-  const lat = latDeg * DEG2RAD;
-  const lon = lonDeg * DEG2RAD;
-  out.set(
-    r * Math.cos(lat) * Math.cos(lon),
-    r * Math.sin(lat),
-    -r * Math.cos(lat) * Math.sin(lon),
-  );
-}
 
 /**
  * Grille lat/lon adaptative.
