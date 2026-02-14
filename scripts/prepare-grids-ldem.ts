@@ -1,13 +1,13 @@
 /**
- * prepare-grids-ldem.ts — Découpe les LDEM globaux en tuiles Float32 pour le maillage adaptatif.
+ * prepare-grids-ldem.ts — Découpe les LDEM globaux en tuiles Int16 pour le maillage adaptatif.
  *
  * Sources :
  *   - LDEM_64.IMG  (23040×11520, Int16 LE, 64ppd)  → résolutions 513, 1025
  *   - LDEM_128.IMG (46080×23040, Int16 LE, 128ppd) → résolution 2049
  *
- * altitude_m = DN × 0.5
+ * Les tuiles stockent les DN bruts (Int16). altitude_m = DN × 0.5 (appliqué au chargement).
  *
- * Produit 288 tuiles (15°×15°) × 3 résolutions au format Float32 binaire
+ * Produit 288 tuiles (15°×15°) × 3 résolutions au format Int16 binaire
  * dans D:\MoonOrbiterData\grids\
  *
  * Pas de stitching — les tuiles sont extraites de la même grille globale continue,
@@ -71,7 +71,7 @@ function extractTile(
   lonMinDeg: number,
   latMinDeg: number,
   outputSize: number,
-): Float32Array {
+): Int16Array {
   const latMaxDeg = latMinDeg + TILE_DEG;
   const tilePix = ldemPPD * TILE_DEG; // pixels natifs par tuile
 
@@ -80,7 +80,7 @@ function extractTile(
   const colStart = lonMinDeg * ldemPPD;
   const rowStart = (90 - latMaxDeg) * ldemPPD;
 
-  const result = new Float32Array(outputSize * outputSize);
+  const result = new Int16Array(outputSize * outputSize);
 
   for (let outRow = 0; outRow < outputSize; outRow++) {
     for (let outCol = 0; outCol < outputSize; outCol++) {
@@ -107,10 +107,11 @@ function extractTile(
       const v10 = ldem[Math.min(gr1, ldemHeight - 1) * ldemWidth + Math.min(gc0, ldemWidth - 1)];
       const v11 = ldem[Math.min(gr1, ldemHeight - 1) * ldemWidth + Math.min(gc1, ldemWidth - 1)];
 
+      // Interpolation bilinéaire puis arrondi vers l'entier le plus proche (DN brut)
       const dn = v00 * (1 - fr) * (1 - fc) + v01 * (1 - fr) * fc
                + v10 * fr * (1 - fc) + v11 * fr * fc;
 
-      result[outRow * outputSize + outCol] = dn * LDEM_SCALE;
+      result[outRow * outputSize + outCol] = Math.round(dn);
     }
   }
 
@@ -174,7 +175,7 @@ function main() {
         for (const res of source.resolutions) {
           const filePath = path.join(OUTPUT_DIR, String(res), `${tileName}.bin`);
           const data = extractTile(ldem, source.width, source.height, source.ppd, lonMin, latMin, res);
-          fs.writeFileSync(filePath, Buffer.from(data.buffer));
+          fs.writeFileSync(filePath, Buffer.from(data.buffer, data.byteOffset, data.byteLength));
         }
 
         done++;
@@ -194,7 +195,8 @@ function main() {
   // Manifest
   console.log('📝 Manifest...');
   const manifest = {
-    version: 4,
+    version: 5,
+    format: 'int16' as const,
     sources: LDEM_SOURCES
       .filter(s => fs.existsSync(s.path))
       .map(s => ({
@@ -207,7 +209,7 @@ function main() {
     tileDeg: TILE_DEG,
     resolutions: allResolutions,
     scalingFactor: LDEM_SCALE,
-    notes: 'Sans stitching — grille globale continue. LDEM 64ppd → 513/1025, LDEM 128ppd → 2049.',
+    notes: 'Format Int16 (DN bruts). altitude_m = DN × scalingFactor. LDEM 64ppd → 513/1025, LDEM 128ppd → 2049.',
   };
   fs.writeFileSync(path.join(OUTPUT_DIR, 'manifest.json'), JSON.stringify(manifest, null, 2));
 

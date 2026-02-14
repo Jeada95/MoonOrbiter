@@ -255,11 +255,12 @@ export class GuiControls {
     // Fire initial state so main.ts sets up correctly
     if (isAdaptiveInit) multiTile.onToggleAdaptive(true);
     if (prefs.graticule) multiTile.onToggleGraticule(true);
+    // Toujours appliquer les counts sauvegardés (même si formations désactivées)
+    multiTile.onMariaCountChange(prefs.mariaCount);
+    multiTile.onCratersCountChange(prefs.cratersCount);
+    multiTile.onOtherCountChange(prefs.otherCount);
     if (prefs.formations) {
       multiTile.onToggleFormations(true);
-      multiTile.onMariaCountChange(prefs.mariaCount);
-      multiTile.onCratersCountChange(prefs.cratersCount);
-      multiTile.onOtherCountChange(prefs.otherCount);
       if (prefs.wiki) multiTile.onToggleWiki(true);
     }
     if (prefs.adaptiveResolution > 1) {

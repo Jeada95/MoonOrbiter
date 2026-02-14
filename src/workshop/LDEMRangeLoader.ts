@@ -1,20 +1,26 @@
 /**
- * Partial LDEM loader using HTTP Range requests.
+ * Grid-based elevation extractor for the Workshop.
  *
- * Fetches only the rows needed for a lat/lon rectangle from LDEM_128.IMG
- * (46080×23040, Int16 LE, DN×0.5 = meters, row-major north→south, lon 0→360°).
+ * Replaces the former LDEM_128.IMG Range-request loader.
+ * Loads pre-computed grid tiles (Int16 or Float32) via LocalGridLoader,
+ * stitches them together, crops to the requested lat/lon rectangle,
+ * and downsamples if needed.
+ *
+ * The function signature and return type are kept identical so that
+ * BrickMeshBuilder and main.ts need no changes.
  */
 
-import { getDataUrl } from '../utils/data-paths';
+import { LocalGridLoader, type GridResolution } from '../adaptive/LocalGridLoader';
+import { GRID_RESOLUTIONS } from '../utils/config';
 
 // ─── Constants ──────────────────────────────────────────────────
-const LDEM128_WIDTH = 46080;
-const LDEM128_HEIGHT = 23040;
-const LDEM128_SCALE = 0.5; // DN → meters
-const BYTES_PER_SAMPLE = 2; // Int16
+const TILE_DEG = 15;
 
-/** Maximum grid dimension for the extracted region */
+/** Maximum output grid dimension (WebGL / STL vertex budget) */
 const MAX_GRID_DIM = 2049;
+
+/** Shared loader instance — benefits from LRU cache across Workshop calls */
+const gridLoader = new LocalGridLoader(30);
 
 // ─── Types ──────────────────────────────────────────────────────
 
@@ -45,7 +51,7 @@ function lonTo360(lon: number): number {
  */
 function downsample(
   data: Float32Array, srcW: number, srcH: number, maxDim: number,
-): { data: Float32Array; width: number; height: number; stepCol: number; stepRow: number } {
+): { data: Float32Array; width: number; height: number } {
   const stepCol = Math.ceil(srcW / maxDim);
   const stepRow = Math.ceil(srcH / maxDim);
   const dstW = Math.ceil(srcW / stepCol);
@@ -58,14 +64,33 @@ function downsample(
       out[dr * dstW + dc] = data[sr * srcW + sc];
     }
   }
-  return { data: out, width: dstW, height: dstH, stepCol, stepRow };
+  return { data: out, width: dstW, height: dstH };
+}
+
+/**
+ * Choose the best grid resolution for the requested region.
+ * Use highest available resolution (2049) unless the region is so large
+ * that the stitched grid would be enormous (>4 tiles per axis → use 1025).
+ */
+function chooseResolution(latSpan: number, lonSpan: number): GridResolution {
+  const maxSpan = Math.max(latSpan, lonSpan);
+  const tilesAcross = Math.ceil(maxSpan / TILE_DEG);
+  // Highest available resolution
+  const maxRes = GRID_RESOLUTIONS[GRID_RESOLUTIONS.length - 1];
+  if (tilesAcross > 4) {
+    // Large region: stitching at 2049 would produce >8K samples — use 1025
+    return (GRID_RESOLUTIONS.includes(1025 as any) ? 1025 : maxRes) as GridResolution;
+  }
+  return maxRes as GridResolution;
 }
 
 // ─── Main extraction ────────────────────────────────────────────
 
 /**
- * Extract a rectangular region of elevation data from LDEM_128.IMG
- * using a single HTTP Range request.
+ * Extract a rectangular region of elevation data from pre-computed grid tiles.
+ *
+ * Drop-in replacement for the former LDEM_128 Range-request version.
+ * Same signature, same return type.
  *
  * @param latMin Southern bound (degrees, -90..90)
  * @param latMax Northern bound (degrees, -90..90)
@@ -85,85 +110,172 @@ export async function extractLDEMRegion(
   // Ensure latMin < latMax
   if (latMin > latMax) [latMin, latMax] = [latMax, latMin];
 
-  // Convert to 0..360 longitude
+  // Convert to 0..360 for grid tile lookup
   const lon0 = lonTo360(lonMin);
   const lon1 = lonTo360(lonMax);
 
-  // Map to LDEM pixel rows (north→south: row 0 = lat +90)
-  const rowStart = Math.max(0, Math.floor(((90 - latMax) / 180) * (LDEM128_HEIGHT - 1)));
-  const rowEnd = Math.min(LDEM128_HEIGHT - 1, Math.ceil(((90 - latMin) / 180) * (LDEM128_HEIGHT - 1)));
-  const numRows = rowEnd - rowStart + 1;
-
-  // Map to LDEM pixel columns
-  const colStart = Math.max(0, Math.floor((lon0 / 360) * (LDEM128_WIDTH - 1)));
-  const colEnd = Math.min(LDEM128_WIDTH - 1, Math.ceil((lon1 / 360) * (LDEM128_WIDTH - 1)));
-
-  // Handle antimeridian wrapping (lon0 > lon1 means crossing 360/0)
+  // Handle antimeridian wrapping (lon0 > lon1 in 0..360 means crossing 0/360)
   const wraps = lon0 > lon1;
-  const numCols = wraps
-    ? (LDEM128_WIDTH - colStart) + (colEnd + 1)
-    : (colEnd - colStart + 1);
+  const lonSpan = wraps ? (360 - lon0 + lon1) : (lon1 - lon0);
+  const latSpan = latMax - latMin;
 
-  log(`Zone: ${numCols}×${numRows} pixels LDEM 128ppd`);
+  // Choose grid resolution
+  const resolution = chooseResolution(latSpan, lonSpan);
+  const ppd = (resolution - 1) / TILE_DEG; // effective pixels per degree
 
-  // Fetch the full row band as a single Range request
-  const bytesPerRow = LDEM128_WIDTH * BYTES_PER_SAMPLE;
-  const startByte = rowStart * bytesPerRow;
-  const endByte = (rowEnd + 1) * bytesPerRow - 1;
-  const fetchSize = endByte - startByte + 1;
+  // ─── Identify covering tiles ──────────────────────────────────
 
-  log(`Fetching ${(fetchSize / 1024 / 1024).toFixed(1)} MB...`);
-
-  const response = await fetch(getDataUrl('/moon-data/LDEM_128.IMG'), {
-    headers: { Range: `bytes=${startByte}-${endByte}` },
-  });
-
-  if (!response.ok && response.status !== 206) {
-    throw new Error(`LDEM fetch failed: ${response.status} ${response.statusText}`);
+  // Latitude tiles (sorted south → north)
+  const tileLats: number[] = [];
+  const tileLatStart = Math.floor(latMin / TILE_DEG) * TILE_DEG;
+  // Use small epsilon so latMax exactly on tile boundary doesn't add extra tile
+  const tileLatEnd = Math.floor((latMax - 0.0001) / TILE_DEG) * TILE_DEG;
+  for (let lat = tileLatStart; lat <= tileLatEnd; lat += TILE_DEG) {
+    tileLats.push(lat);
   }
 
-  const buffer = await response.arrayBuffer();
-  const band = new Int16Array(buffer);
+  // Longitude tiles (in 0..360 space)
+  const tileLons: number[] = [];
+  if (wraps) {
+    // From lon0 tile to 345°, then from 0° to lon1 tile
+    const startTile = Math.floor(lon0 / TILE_DEG) * TILE_DEG;
+    for (let lon = startTile; lon < 360; lon += TILE_DEG) {
+      tileLons.push(lon);
+    }
+    const endTile = Math.floor((lon1 - 0.0001) / TILE_DEG) * TILE_DEG;
+    for (let lon = 0; lon <= endTile; lon += TILE_DEG) {
+      tileLons.push(lon);
+    }
+  } else {
+    const startTile = Math.floor(lon0 / TILE_DEG) * TILE_DEG;
+    const endTile = Math.floor((lon1 - 0.0001) / TILE_DEG) * TILE_DEG;
+    for (let lon = startTile; lon <= endTile; lon += TILE_DEG) {
+      tileLons.push(lon);
+    }
+  }
 
-  log('Extracting elevation data...');
+  const totalTiles = tileLats.length * tileLons.length;
+  log(`Chargement ${totalTiles} tuile(s) ${resolution}×${resolution}...`);
 
-  // Extract the column subset from the fetched band
-  const rawData = new Float32Array(numCols * numRows);
+  // ─── Load all tiles ───────────────────────────────────────────
 
-  for (let r = 0; r < numRows; r++) {
-    const bandRowOffset = r * LDEM128_WIDTH;
+  type TileEntry = { latMin: number; lonMin: number; data: Float32Array };
+  const tiles: TileEntry[] = [];
 
-    if (wraps) {
-      // First part: colStart → end of row
-      const part1Len = LDEM128_WIDTH - colStart;
-      for (let c = 0; c < part1Len; c++) {
-        rawData[r * numCols + c] = band[bandRowOffset + colStart + c] * LDEM128_SCALE;
-      }
-      // Second part: start of row → colEnd
-      for (let c = 0; c <= colEnd; c++) {
-        rawData[r * numCols + part1Len + c] = band[bandRowOffset + c] * LDEM128_SCALE;
-      }
-    } else {
-      for (let c = 0; c < numCols; c++) {
-        rawData[r * numCols + c] = band[bandRowOffset + colStart + c] * LDEM128_SCALE;
+  const promises: Promise<void>[] = [];
+  for (const tLat of tileLats) {
+    for (const tLon of tileLons) {
+      promises.push(
+        gridLoader.loadGrid(tLat, tLon, resolution).then(grid => {
+          tiles.push({ latMin: tLat, lonMin: tLon, data: grid.data });
+        })
+      );
+    }
+  }
+  await Promise.all(promises);
+
+  log(`${tiles.length} tuile(s) chargée(s), assemblage...`);
+
+  // ─── Stitch tiles into a unified grid ─────────────────────────
+
+  const numTilesLat = tileLats.length;
+  const numTilesLon = tileLons.length;
+  // Adjacent tiles share one boundary row/col → stride = (resolution - 1)
+  const stitchedRows = numTilesLat * (resolution - 1) + 1;
+  const stitchedCols = numTilesLon * (resolution - 1) + 1;
+
+  // Geographic extent of stitched area
+  const stitchedLatMin = tileLats[0];
+  const stitchedLatMax = tileLats[numTilesLat - 1] + TILE_DEG;
+  const stitchedLon0 = tileLons[0]; // in 0..360
+
+  const stitched = new Float32Array(stitchedRows * stitchedCols);
+
+  // Fill stitched grid — row 0 = north (stitchedLatMax)
+  for (const tile of tiles) {
+    const tLatIdx = tileLats.indexOf(tile.latMin);
+    const tLonIdx = tileLons.indexOf(tile.lonMin);
+
+    // In stitched grid (north at top): northernmost tile = row 0
+    const rowOffset = (numTilesLat - 1 - tLatIdx) * (resolution - 1);
+    const colOffset = tLonIdx * (resolution - 1);
+
+    for (let r = 0; r < resolution; r++) {
+      const dstRow = rowOffset + r;
+      const srcBase = r * resolution;
+      const dstBase = dstRow * stitchedCols + colOffset;
+      for (let c = 0; c < resolution; c++) {
+        stitched[dstBase + c] = tile.data[srcBase + c];
       }
     }
   }
 
-  // Downsample if grid exceeds MAX_GRID_DIM
-  let finalData: Float32Array = rawData;
-  let finalW = numCols;
-  let finalH = numRows;
+  // ─── Crop & interpolate to exact requested bounds ─────────────
 
-  if (numCols > MAX_GRID_DIM || numRows > MAX_GRID_DIM) {
-    log(`Downsampling from ${numCols}×${numRows} to fit ${MAX_GRID_DIM}...`);
-    const ds = downsample(rawData, numCols, numRows, MAX_GRID_DIM);
-    finalData = ds.data;
+  let outCols = Math.round(lonSpan * ppd) + 1;
+  let outRows = Math.round(latSpan * ppd) + 1;
+
+  // Clamp to reasonable size before potential downsample
+  outCols = Math.max(2, outCols);
+  outRows = Math.max(2, outRows);
+
+  const rawData = new Float32Array(outRows * outCols);
+
+  // Stitched lon span in degrees
+  const stitchedLonSpan = numTilesLon * TILE_DEG;
+
+  for (let r = 0; r < outRows; r++) {
+    // Latitude of this output row (north at top)
+    const lat = latMax - (r / (outRows - 1)) * latSpan;
+    // Fractional row in stitched grid
+    const stitchedRowF = ((stitchedLatMax - lat) / (stitchedLatMax - stitchedLatMin))
+      * (stitchedRows - 1);
+
+    for (let c = 0; c < outCols; c++) {
+      // Longitude of this output column (in 0..360)
+      let lon360: number;
+      if (wraps) {
+        lon360 = (lon0 + (c / (outCols - 1)) * lonSpan) % 360;
+      } else {
+        lon360 = lon0 + (c / (outCols - 1)) * lonSpan;
+      }
+
+      // Fractional col in stitched grid
+      let lonFromStart = lon360 - stitchedLon0;
+      if (wraps && lonFromStart < 0) lonFromStart += 360;
+      const stitchedColF = (lonFromStart / stitchedLonSpan) * (stitchedCols - 1);
+
+      // Bilinear interpolation
+      const r0 = Math.floor(stitchedRowF);
+      const r1 = Math.min(r0 + 1, stitchedRows - 1);
+      const c0 = Math.floor(stitchedColF);
+      const c1 = Math.min(c0 + 1, stitchedCols - 1);
+      const fr = stitchedRowF - r0;
+      const fc = stitchedColF - c0;
+
+      rawData[r * outCols + c] =
+        stitched[r0 * stitchedCols + c0] * (1 - fr) * (1 - fc) +
+        stitched[r0 * stitchedCols + c1] * (1 - fr) * fc +
+        stitched[r1 * stitchedCols + c0] * fr * (1 - fc) +
+        stitched[r1 * stitchedCols + c1] * fr * fc;
+    }
+  }
+
+  // ─── Downsample if needed ─────────────────────────────────────
+
+  let finalData: Float32Array = rawData;
+  let finalW = outCols;
+  let finalH = outRows;
+
+  if (outCols > MAX_GRID_DIM || outRows > MAX_GRID_DIM) {
+    log(`Sous-échantillonnage de ${outCols}×${outRows}...`);
+    const ds = downsample(rawData, outCols, outRows, MAX_GRID_DIM);
+    finalData = ds.data as Float32Array;
     finalW = ds.width;
     finalH = ds.height;
   }
 
-  log(`Grid: ${finalW}×${finalH} (${(finalData.byteLength / 1024).toFixed(0)} KB)`);
+  log(`Grille: ${finalW}×${finalH} (${(finalData.byteLength / 1024).toFixed(0)} KB)`);
 
   return {
     data: finalData,

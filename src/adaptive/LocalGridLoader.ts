@@ -3,8 +3,13 @@ import { getGridBasePath, GRID_RESOLUTIONS } from '../utils/config';
 
 export type GridResolution = typeof GRID_RESOLUTIONS[number];
 
+/** Facteur DN → mètres pour les tuiles Int16 (identique au LDEM source) */
+const DN_SCALE = 0.5;
+
 /**
- * Charge les grilles Float32 pré-calculées depuis le serveur local (D:\MoonOrbiterData\grids\).
+ * Charge les grilles d'élévation pré-calculées depuis le serveur local (D:\MoonOrbiterData\grids\).
+ * Supporte les formats Int16 (DN bruts, × 0.5 = mètres) et Float32 (mètres, legacy).
+ * Le format est détecté automatiquement par la taille du buffer.
  * Sources : LDEM 64ppd (résolutions 513, 1025) + LDEM 128ppd (résolution 2049).
  */
 export class LocalGridLoader {
@@ -52,11 +57,24 @@ export class LocalGridLoader {
     }
 
     const buffer = await response.arrayBuffer();
-    const data = new Float32Array(buffer);
+    const expectedSamples = resolution * resolution;
 
-    if (data.length !== resolution * resolution) {
+    let data: Float32Array;
+
+    if (buffer.byteLength === expectedSamples * 2) {
+      // Format Int16 : DN bruts, convertir en mètres (DN × 0.5)
+      const int16 = new Int16Array(buffer);
+      data = new Float32Array(expectedSamples);
+      for (let i = 0; i < expectedSamples; i++) {
+        data[i] = int16[i] * DN_SCALE;
+      }
+    } else if (buffer.byteLength === expectedSamples * 4) {
+      // Format Float32 legacy : déjà en mètres
+      data = new Float32Array(buffer);
+    } else {
       throw new Error(
-        `Taille grille invalide: ${data.length} (attendu ${resolution * resolution})`
+        `Taille grille invalide: ${buffer.byteLength} bytes ` +
+        `(attendu ${expectedSamples * 2} Int16 ou ${expectedSamples * 4} Float32)`
       );
     }
 

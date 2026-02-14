@@ -301,6 +301,8 @@ async function workshopExtractAndBuild(featureName: string, createGui: boolean):
       workshopScene = new WorkshopScene(moonScene.renderer);
     }
     workshopScene.setBrick(brick);
+    // Appliquer les prefs de lumière (setBrick() reset à 45°/30° par défaut)
+    workshopScene.setLightDirection(workshopLightAzimuth, workshopLightElevation);
 
     const { nsKm, ewKm } = wsZoneSizeKm();
 
