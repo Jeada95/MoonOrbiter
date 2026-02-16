@@ -18,8 +18,10 @@ import { loadPreferences, savePreferences } from './utils/preferences';
 import { extractLDEMRegion } from './workshop/LDEMRangeLoader';
 import { buildBrickGeometry, updateBrickExaggeration, type BrickResult } from './workshop/BrickMeshBuilder';
 import { WorkshopScene } from './workshop/WorkshopScene';
-import { WorkshopGui } from './workshop/WorkshopGui';
-import { exportMeshAsSTL, makeSTLFilename } from './workshop/STLExport';
+import { WorkshopHubGui } from './workshop/WorkshopHubGui';
+import { exportMeshAsSTL, makeSTLFilename, exportScaledMeshAsSTL, makePieceSTLFilename } from './workshop/STLExport';
+import { type PieceCount, decomposePieceCount, computeAllPieceBounds, type PieceBounds } from './workshop/PieceDecomposer';
+import { buildShellSegment, type ShellSegmentResult } from './workshop/SphericalShellBuilder';
 
 // --- Initialization ---
 const moonScene = new MoonScene();
@@ -103,7 +105,7 @@ const graticule = new GraticuleOverlay(moonScene.scene);
 
 // --- Lunar formations ---
 const formations = new FormationsOverlay();
-formations.setWorkshopCallback((name: string) => enterWorkshop(name));
+formations.setWorkshopCallback((name: string) => enterWorkshopHub(name));
 formations.loadData(getDataUrl('/moon-data/lunar_features.json'))
   .then(() => {
     console.log('Lunar features loaded');
@@ -227,8 +229,12 @@ hud.setSunInfo(initialSun.subSolarLat, initialSun.subSolarLon, currentDateTime);
 
 // --- Workshop mode state ---
 let workshopMode = false;
+type WorkshopSubMode = 'idle' | 'feature' | 'fmp';
+let workshopSubMode: WorkshopSubMode = 'idle';
 let workshopScene: WorkshopScene | null = null;
-let workshopGui: WorkshopGui | null = null;
+let workshopHubGui: WorkshopHubGui | null = null;
+
+// Feature Print state
 let workshopBrick: BrickResult | null = null;
 let workshopFeatureName = '';
 let workshopExaggeration = prefs.adaptiveExaggeration;
@@ -240,11 +246,27 @@ let wsLatMax = 0;
 let wsLonMin = 0;
 let wsLonMax = 0;
 let wsCenterLat = 0; // needed for km↔deg conversion
+
+// State saved before entering workshop
 let wsFormationsWasVisible = false;
 let wsGraticuleWasVisible = false;
 
 const MOON_RADIUS_KM = 1737.4;
 const KM_PER_DEG_LAT = (Math.PI * MOON_RADIUS_KM) / 180; // ~30.33 km/deg
+
+// Light preferences (shared across workshop sub-modes)
+let workshopLightAzimuth = prefs.wsLightAzimuth;
+let workshopLightElevation = prefs.wsLightElevation;
+
+// FMP state
+let fmpPieceCount = prefs.fmpPieceCount as PieceCount;
+let fmpDiameterMM = prefs.fmpDiameterMM;
+let fmpShellThicknessMM = prefs.fmpShellThicknessMM;
+let fmpExaggeration = prefs.fmpExaggeration;
+let fmpLightAzimuth = prefs.fmpLightAzimuth;
+let fmpLightElevation = prefs.fmpLightElevation;
+let fmpSegments: ShellSegmentResult[] = [];
+let fmpPieces: PieceBounds[] = [];
 
 // DOM elements to hide/show
 const hudEl = document.getElementById('hud');
@@ -267,6 +289,36 @@ function hideLoading(): void {
   loadingOverlay.style.display = 'none';
 }
 
+// ─── Globe show/hide helpers ──────────────────────────────────
+
+function hideGlobeElements(): void {
+  wsGraticuleWasVisible = graticule.isVisible();
+  wsFormationsWasVisible = formations.isVisible();
+  globe.setVisible(false);
+  tileManager.setVisible(false);
+  starfield.setVisible(false);
+  graticule.setVisible(false);
+  formations.setVisible(false);
+  if (hudEl) hudEl.style.display = 'none';
+  if (titleEl) titleEl.style.display = 'none';
+  gui.hide();
+  moonScene.controls.enabled = false;
+}
+
+function restoreGlobeElements(): void {
+  globe.setVisible(!adaptiveMode);
+  tileManager.setVisible(adaptiveMode);
+  starfield.setVisible(true);
+  if (hudEl) hudEl.style.display = '';
+  if (titleEl) titleEl.style.display = '';
+  gui.show();
+  moonScene.controls.enabled = true;
+  if (wsGraticuleWasVisible) graticule.setVisible(true);
+  if (wsFormationsWasVisible) formations.setVisible(true);
+}
+
+// ─── Feature Print helpers ────────────────────────────────────
+
 /** Compute current workshop zone size in km */
 function wsZoneSizeKm(): { nsKm: number; ewKm: number } {
   const nsKm = (wsLatMax - wsLatMin) * KM_PER_DEG_LAT;
@@ -276,16 +328,14 @@ function wsZoneSizeKm(): { nsKm: number; ewKm: number } {
 }
 
 /** Extract and build the workshop brick from current ws bounds */
-async function workshopExtractAndBuild(featureName: string, createGui: boolean): Promise<void> {
+async function featureExtractAndBuild(featureName: string): Promise<void> {
   showLoading(`Extracting terrain around ${featureName}...`);
 
   try {
-    // Extract LDEM region
     const heightmap = await extractLDEMRegion(wsLatMin, wsLatMax, wsLonMin, wsLonMax, (msg) => {
       showLoading(`${featureName}: ${msg}`);
     });
 
-    // Build brick geometry
     showLoading(`Building 3D mesh...`);
     const brick = buildBrickGeometry({
       heightmap,
@@ -296,129 +346,336 @@ async function workshopExtractAndBuild(featureName: string, createGui: boolean):
     workshopBrick = brick;
     workshopFeatureName = featureName;
 
-    // Create workshop scene (lazy — reuses main renderer)
     if (!workshopScene) {
       workshopScene = new WorkshopScene(moonScene.renderer);
     }
     workshopScene.setBrick(brick);
-    // Appliquer les prefs de lumière (setBrick() reset à 45°/30° par défaut)
     workshopScene.setLightDirection(workshopLightAzimuth, workshopLightElevation);
 
     const { nsKm, ewKm } = wsZoneSizeKm();
-
-    if (createGui) {
-      // Create workshop GUI
-      if (workshopGui) workshopGui.dispose();
-      workshopGui = new WorkshopGui(featureName, nsKm, ewKm, {
-        onZoneExpand: (direction, stepKm) => {
-          const MIN_ZONE_KM = 20;
-          const degLat = stepKm / KM_PER_DEG_LAT;
-          const cosLat = Math.cos(wsCenterLat * Math.PI / 180);
-          const degLon = stepKm / (KM_PER_DEG_LAT * cosLat);
-
-          if (direction === 'north') wsLatMax = Math.min(90, wsLatMax + degLat);
-          else if (direction === 'south') wsLatMin = Math.max(-90, wsLatMin - degLat);
-          else if (direction === 'east') wsLonMax += degLon;
-          else if (direction === 'west') wsLonMin -= degLon;
-
-          // Enforce minimum zone size
-          if ((wsLatMax - wsLatMin) * KM_PER_DEG_LAT < MIN_ZONE_KM) {
-            if (direction === 'north') wsLatMax = wsLatMin + MIN_ZONE_KM / KM_PER_DEG_LAT;
-            else if (direction === 'south') wsLatMin = wsLatMax - MIN_ZONE_KM / KM_PER_DEG_LAT;
-          }
-          const ewNow = (wsLonMax - wsLonMin) * KM_PER_DEG_LAT * cosLat;
-          if (ewNow < MIN_ZONE_KM) {
-            const minDeg = MIN_ZONE_KM / (KM_PER_DEG_LAT * cosLat);
-            if (direction === 'east') wsLonMax = wsLonMin + minDeg;
-            else if (direction === 'west') wsLonMin = wsLonMax - minDeg;
-          }
-
-          // Re-extract with new bounds (keep existing GUI)
-          workshopExtractAndBuild(workshopFeatureName, false).then(() => {
-            const size = wsZoneSizeKm();
-            workshopGui?.updateZoneSize(size.nsKm, size.ewKm);
-          });
-        },
-        onExaggerationChange: (exag: number) => {
-          workshopExaggeration = exag;
-          if (workshopBrick && workshopScene) {
-            updateBrickExaggeration(workshopBrick, exag, workshopBaseThickness, workshopBrick.geometry);
-            workshopScene.updateGeometry(workshopBrick.geometry);
-          }
-        },
-        onBaseThicknessChange: (km: number) => {
-          workshopBaseThickness = km;
-          savePreferences({ wsBaseThickness: km });
-          if (workshopBrick && workshopScene) {
-            updateBrickExaggeration(workshopBrick, workshopExaggeration, km, workshopBrick.geometry);
-            workshopScene.updateGeometry(workshopBrick.geometry);
-          }
-        },
-        onLightAzimuthChange: (deg: number) => {
-          workshopScene?.setLightDirection(deg, workshopLightElevation);
-          workshopLightAzimuth = deg;
-          savePreferences({ wsLightAzimuth: deg });
-        },
-        onLightElevationChange: (deg: number) => {
-          workshopScene?.setLightDirection(workshopLightAzimuth, deg);
-          workshopLightElevation = deg;
-          savePreferences({ wsLightElevation: deg });
-        },
-        onWireframeChange: (enabled: boolean) => {
-          workshopScene?.setWireframe(enabled);
-        },
-        onExportSTL: () => {
-          if (!workshopScene) return;
-          const mesh = workshopScene.getBrickMesh();
-          if (!mesh) return;
-          const filename = makeSTLFilename(workshopFeatureName, workshopExaggeration);
-          exportMeshAsSTL(mesh, filename);
-        },
-        onBack: () => {
-          exitWorkshop();
-        },
-      }, {
-        exaggeration: workshopExaggeration,
-        baseThickness: workshopBaseThickness,
-        azimuth: workshopLightAzimuth,
-        elevation: workshopLightElevation,
-      });
-
-      // Switch to workshop mode
-      workshopMode = true;
-      workshopScene.activate();
-      moonScene.controls.enabled = false;
-
-      // Hide globe elements
-      globe.setVisible(false);
-      tileManager.setVisible(false);
-      starfield.setVisible(false);
-      wsGraticuleWasVisible = graticule.isVisible();
-      wsFormationsWasVisible = formations.isVisible();
-      graticule.setVisible(false);
-      formations.setVisible(false);
-      if (hudEl) hudEl.style.display = 'none';
-      if (titleEl) titleEl.style.display = 'none';
-      gui.hide();
-    }
+    workshopHubGui?.updateZoneSize(nsKm, ewKm);
 
     hideLoading();
-    console.log(`Workshop mode: ${featureName} (${brick.cols}×${brick.rows}, ${nsKm.toFixed(0)}×${ewKm.toFixed(0)} km)`);
-
+    console.log(`Feature Print: ${featureName} (${brick.cols}×${brick.rows}, ${nsKm.toFixed(0)}×${ewKm.toFixed(0)} km)`);
   } catch (err) {
     hideLoading();
-    console.error('Workshop extraction failed:', err);
+    console.error('Feature extraction failed:', err);
     alert(`Failed to extract terrain: ${(err as Error).message}`);
   }
 }
 
-let workshopLightAzimuth = prefs.wsLightAzimuth;
-let workshopLightElevation = prefs.wsLightElevation;
+// ─── FMP helpers ──────────────────────────────────────────────
 
-/** Enter workshop mode: compute initial zone and extract */
-async function enterWorkshop(featureName: string): Promise<void> {
+/** Compute shell thickness in km from mm parameters */
+function fmpShellThicknessKm(): number {
+  const scaleMM = fmpDiameterMM / (2 * MOON_RADIUS_KM);
+  return fmpShellThicknessMM / scaleMM;
+}
+
+/** Compute lip depth in km from a 0.4mm lip at current scale */
+function fmpLipDepthKm(): number {
+  const scaleMM = fmpDiameterMM / (2 * MOON_RADIUS_KM);
+  return 0.4 / scaleMM;
+}
+
+/** Build all pieces for the current FMP configuration */
+async function fmpBuildAllPieces(): Promise<void> {
+  const decomp = decomposePieceCount(fmpPieceCount);
+  fmpPieces = computeAllPieceBounds(decomp.bands, decomp.sectors);
+
+  showLoading(`Building ${fmpPieces.length} pieces (${decomp.bands}×${decomp.sectors})...`);
+
+  const shellThKm = fmpShellThicknessKm();
+  const lipKm = fmpLipDepthKm();
+
+  for (const seg of fmpSegments) seg.geometry.dispose();
+  fmpSegments = [];
+
+  for (let i = 0; i < fmpPieces.length; i++) {
+    const piece = fmpPieces[i];
+    showLoading(`Piece ${i + 1}/${fmpPieces.length}: extracting terrain...`);
+
+    const heightmap = await extractLDEMRegion(
+      piece.latMin, piece.latMax, piece.lonMin, piece.lonMax,
+      (msg) => showLoading(`Piece ${i + 1}/${fmpPieces.length}: ${msg}`),
+      513,
+    );
+
+    showLoading(`Piece ${i + 1}/${fmpPieces.length}: building geometry...`);
+
+    const seg = buildShellSegment({
+      heightmap,
+      piece,
+      exaggeration: fmpExaggeration,
+      shellThicknessKm: shellThKm,
+      lipDepthKm: lipKm,
+    });
+
+    fmpSegments.push(seg);
+  }
+
+  showLoading('Assembling preview...');
+}
+
+/** Show the assembly view (all pieces with explode) */
+function fmpShowAssembly(): void {
+  if (!workshopScene || fmpSegments.length === 0) return;
+  workshopScene.clearPieces();
+  const geometries = fmpSegments.map(s => s.geometry);
+  workshopScene.setPieces(geometries, 0.03);
+}
+
+/** Show a single piece in print orientation */
+function fmpShowPiece(index: number): void {
+  if (!workshopScene || index >= fmpSegments.length) return;
+  const seg = fmpSegments[index];
+  const piece = seg.piece;
+
+  const midLat = (piece.latMin + piece.latMax) / 2;
+  const midLon = (piece.lonMin + piece.lonMax) / 2;
+  const latRad = midLat * Math.PI / 180;
+  const lonRad = midLon * Math.PI / 180;
+  const dir = new THREE.Vector3(
+    Math.cos(latRad) * Math.cos(lonRad),
+    Math.sin(latRad),
+    -Math.cos(latRad) * Math.sin(lonRad),
+  );
+
+  workshopScene.showSinglePiece(seg.geometry, dir);
+}
+
+/** Compute piece center direction for export rotation */
+function fmpPieceCenterDir(piece: PieceBounds): THREE.Vector3 {
+  const midLat = (piece.latMin + piece.latMax) / 2;
+  const midLon = (piece.lonMin + piece.lonMax) / 2;
+  const latRad = midLat * Math.PI / 180;
+  const lonRad = midLon * Math.PI / 180;
+  return new THREE.Vector3(
+    Math.cos(latRad) * Math.cos(lonRad),
+    Math.sin(latRad),
+    -Math.cos(latRad) * Math.sin(lonRad),
+  );
+}
+
+// ─── Clean up sub-mode data (without restoring globe) ─────────
+
+/** Clean feature print data */
+function cleanFeatureData(): void {
+  if (workshopBrick) {
+    workshopBrick.geometry.dispose();
+    workshopBrick = null;
+  }
+  if (workshopScene) {
+    workshopScene.clearBrick();
+  }
+}
+
+/** Clean FMP data */
+function cleanFmpData(): void {
+  if (workshopScene) workshopScene.clearPieces();
+  for (const seg of fmpSegments) seg.geometry.dispose();
+  fmpSegments = [];
+  fmpPieces = [];
+}
+
+// ─── Workshop mode entry/exit ─────────────────────────────────
+
+/** Create the hub GUI with all callbacks */
+function createWorkshopHubGui(): WorkshopHubGui {
+  const featureNames = formations.getAllFeatureNames();
+  return new WorkshopHubGui(featureNames, {
+    // ─── Feature search ───
+    onSearchFeature: (name) => enterFeaturePrint(name),
+    onClearSearch: () => {
+      // Return to idle within workshop
+      cleanFeatureData();
+      workshopSubMode = 'idle';
+    },
+
+    // ─── Feature Print ───
+    onZoneExpand: (direction, stepKm) => {
+      const MIN_ZONE_KM = 20;
+      const degLat = stepKm / KM_PER_DEG_LAT;
+      const cosLat = Math.cos(wsCenterLat * Math.PI / 180);
+      const degLon = stepKm / (KM_PER_DEG_LAT * cosLat);
+
+      if (direction === 'north') wsLatMax = Math.min(90, wsLatMax + degLat);
+      else if (direction === 'south') wsLatMin = Math.max(-90, wsLatMin - degLat);
+      else if (direction === 'east') wsLonMax += degLon;
+      else if (direction === 'west') wsLonMin -= degLon;
+
+      if ((wsLatMax - wsLatMin) * KM_PER_DEG_LAT < MIN_ZONE_KM) {
+        if (direction === 'north') wsLatMax = wsLatMin + MIN_ZONE_KM / KM_PER_DEG_LAT;
+        else if (direction === 'south') wsLatMin = wsLatMax - MIN_ZONE_KM / KM_PER_DEG_LAT;
+      }
+      const ewNow = (wsLonMax - wsLonMin) * KM_PER_DEG_LAT * cosLat;
+      if (ewNow < MIN_ZONE_KM) {
+        const minDeg = MIN_ZONE_KM / (KM_PER_DEG_LAT * cosLat);
+        if (direction === 'east') wsLonMax = wsLonMin + minDeg;
+        else if (direction === 'west') wsLonMin = wsLonMax - minDeg;
+      }
+
+      featureExtractAndBuild(workshopFeatureName);
+    },
+    onFeatureExaggerationChange: (exag) => {
+      workshopExaggeration = exag;
+      if (workshopBrick && workshopScene) {
+        updateBrickExaggeration(workshopBrick, exag, workshopBaseThickness, workshopBrick.geometry);
+        workshopScene.updateGeometry(workshopBrick.geometry);
+      }
+    },
+    onBaseThicknessChange: (km) => {
+      workshopBaseThickness = km;
+      savePreferences({ wsBaseThickness: km });
+      if (workshopBrick && workshopScene) {
+        updateBrickExaggeration(workshopBrick, workshopExaggeration, km, workshopBrick.geometry);
+        workshopScene.updateGeometry(workshopBrick.geometry);
+      }
+    },
+    onExportFeatureSTL: () => {
+      if (!workshopScene) return;
+      const mesh = workshopScene.getBrickMesh();
+      if (!mesh) return;
+      const filename = makeSTLFilename(workshopFeatureName, workshopExaggeration);
+      exportMeshAsSTL(mesh, filename);
+    },
+
+    // ─── Full Moon Print ───
+    onEnterFullMoonPrint: () => enterFmpSubMode(),
+    onPieceCountChange: async (n) => {
+      fmpPieceCount = n;
+      savePreferences({ fmpPieceCount: n });
+      await fmpBuildAllPieces();
+      fmpShowAssembly();
+      workshopHubGui?.updatePieceList(n);
+      hideLoading();
+    },
+    onDiameterChange: (mm) => {
+      fmpDiameterMM = mm;
+      savePreferences({ fmpDiameterMM: mm });
+    },
+    onShellThicknessChange: async (mm) => {
+      fmpShellThicknessMM = mm;
+      savePreferences({ fmpShellThicknessMM: mm });
+      await fmpBuildAllPieces();
+      fmpShowAssembly();
+      hideLoading();
+    },
+    onFmpExaggerationChange: async (exag) => {
+      fmpExaggeration = exag;
+      savePreferences({ fmpExaggeration: exag });
+      await fmpBuildAllPieces();
+      fmpShowAssembly();
+      hideLoading();
+    },
+    onPreviewChange: (mode) => {
+      if (mode === 'assembly') fmpShowAssembly();
+      else fmpShowPiece(mode);
+    },
+    onExportPiece: (index) => {
+      if (index >= fmpSegments.length) return;
+      const seg = fmpSegments[index];
+      const scaleMM = fmpDiameterMM / (2 * MOON_RADIUS_KM);
+      const dir = fmpPieceCenterDir(seg.piece);
+      const q = new THREE.Quaternion().setFromUnitVectors(dir.normalize(), new THREE.Vector3(0, 1, 0));
+      const filename = makePieceSTLFilename(seg.piece.band, seg.piece.sector, fmpExaggeration, fmpDiameterMM);
+      exportScaledMeshAsSTL(seg.geometry, scaleMM, q, filename);
+    },
+    onExportAll: async () => {
+      const scaleMM = fmpDiameterMM / (2 * MOON_RADIUS_KM);
+      for (let i = 0; i < fmpSegments.length; i++) {
+        showLoading(`Exporting piece ${i + 1}/${fmpSegments.length}...`);
+        const seg = fmpSegments[i];
+        const dir = fmpPieceCenterDir(seg.piece);
+        const q = new THREE.Quaternion().setFromUnitVectors(dir.normalize(), new THREE.Vector3(0, 1, 0));
+        const filename = makePieceSTLFilename(seg.piece.band, seg.piece.sector, fmpExaggeration, fmpDiameterMM);
+        exportScaledMeshAsSTL(seg.geometry, scaleMM, q, filename);
+        await new Promise(r => setTimeout(r, 300));
+      }
+      hideLoading();
+    },
+
+    // ─── Shared ───
+    onLightAzimuthChange: (deg) => {
+      if (workshopSubMode === 'fmp') {
+        fmpLightAzimuth = deg;
+        savePreferences({ fmpLightAzimuth: deg });
+        workshopScene?.setLightDirection(deg, fmpLightElevation);
+      } else {
+        workshopLightAzimuth = deg;
+        savePreferences({ wsLightAzimuth: deg });
+        workshopScene?.setLightDirection(deg, workshopLightElevation);
+      }
+    },
+    onLightElevationChange: (deg) => {
+      if (workshopSubMode === 'fmp') {
+        fmpLightElevation = deg;
+        savePreferences({ fmpLightElevation: deg });
+        workshopScene?.setLightDirection(fmpLightAzimuth, deg);
+      } else {
+        workshopLightElevation = deg;
+        savePreferences({ wsLightElevation: deg });
+        workshopScene?.setLightDirection(workshopLightAzimuth, deg);
+      }
+    },
+    onWireframeChange: (enabled) => {
+      workshopScene?.setWireframe(enabled);
+    },
+    onBack: () => exitWorkshop(),
+  }, {
+    featureExaggeration: workshopExaggeration,
+    baseThickness: workshopBaseThickness,
+    fmpPieceCount,
+    fmpDiameterMM,
+    fmpShellThicknessMM,
+    fmpExaggeration,
+    azimuth: workshopLightAzimuth,
+    elevation: workshopLightElevation,
+  });
+}
+
+/** Enter Workshop Hub (idle mode). If featureName is provided, loads it immediately. */
+async function enterWorkshopHub(featureName?: string): Promise<void> {
+  // Already in workshop? Just switch sub-mode
+  if (workshopMode && featureName) {
+    cleanFmpData();
+    await enterFeaturePrint(featureName);
+    return;
+  }
+  if (workshopMode) return; // already in hub
+
+  // Hide globe
+  hideGlobeElements();
+
+  // Create workshop scene
+  if (!workshopScene) {
+    workshopScene = new WorkshopScene(moonScene.renderer);
+  }
+  workshopScene.activate();
+
+  // Create hub GUI
+  if (workshopHubGui) workshopHubGui.dispose();
+  workshopHubGui = createWorkshopHubGui();
+
+  workshopMode = true;
+  workshopSubMode = 'idle';
+
+  console.log('Entered Workshop hub');
+
+  // Auto-select feature if provided
+  if (featureName) {
+    await enterFeaturePrint(featureName);
+  }
+}
+
+/** Enter Feature Print sub-mode (from within workshop hub) */
+async function enterFeaturePrint(featureName: string): Promise<void> {
   const info = formations.getFeatureInfo(featureName);
   if (!info) { console.warn('Feature not found:', featureName); return; }
+
+  // Clean up previous sub-mode data
+  cleanFmpData();
+  cleanFeatureData();
 
   // Compute initial extraction zone: 1.5× diameter around the feature
   const INITIAL_MARGIN = 1.5;
@@ -433,52 +690,81 @@ async function enterWorkshop(featureName: string): Promise<void> {
   wsLonMin = info.lon - halfExtentLon;
   wsLonMax = info.lon + halfExtentLon;
 
-  await workshopExtractAndBuild(featureName, true);
+  workshopSubMode = 'feature';
+
+  // Update hub GUI
+  workshopHubGui?.selectFeature(featureName);
+
+  // Apply feature light prefs
+  workshopScene?.setLightDirection(workshopLightAzimuth, workshopLightElevation);
+
+  await featureExtractAndBuild(featureName);
 }
 
-/** Exit workshop mode and return to globe */
+/** Enter Full Moon Print sub-mode (from within workshop hub) */
+async function enterFmpSubMode(): Promise<void> {
+  // Clean up previous sub-mode data
+  cleanFeatureData();
+  cleanFmpData();
+
+  workshopSubMode = 'fmp';
+
+  // Update hub GUI
+  workshopHubGui?.openFmpFolder();
+
+  if (!workshopScene) {
+    workshopScene = new WorkshopScene(moonScene.renderer);
+  }
+
+  try {
+    await fmpBuildAllPieces();
+    fmpShowAssembly();
+
+    workshopScene.setLightDirection(fmpLightAzimuth, fmpLightElevation);
+    workshopHubGui?.updatePieceList(fmpPieceCount);
+
+    hideLoading();
+    console.log(`Full Moon Print: ${fmpPieceCount} pieces ready`);
+  } catch (err) {
+    hideLoading();
+    console.error('Full Moon Print failed:', err);
+    alert(`Full Moon Print failed: ${(err as Error).message}`);
+  }
+}
+
+/** Exit workshop mode entirely and return to globe */
 function exitWorkshop(): void {
-  workshopMode = false;
+  // Clean all sub-mode data
+  cleanFeatureData();
+  cleanFmpData();
 
-  // Deactivate workshop
+  // Deactivate workshop scene
   if (workshopScene) workshopScene.deactivate();
-  moonScene.controls.enabled = true;
 
-  // Dispose workshop GUI
-  if (workshopGui) {
-    workshopGui.dispose();
-    workshopGui = null;
+  // Dispose hub GUI
+  if (workshopHubGui) {
+    workshopHubGui.dispose();
+    workshopHubGui = null;
   }
 
-  // Dispose brick geometry
-  if (workshopBrick) {
-    workshopBrick.geometry.dispose();
-    workshopBrick = null;
-  }
+  workshopMode = false;
+  workshopSubMode = 'idle';
 
-  // Restore globe elements
-  globe.setVisible(!adaptiveMode);
-  tileManager.setVisible(adaptiveMode);
-  starfield.setVisible(true);
-  if (hudEl) hudEl.style.display = '';
-  if (titleEl) titleEl.style.display = '';
-  gui.show();
+  // Restore globe
+  restoreGlobeElements();
 
-  // Restaurer l'état des overlays tel qu'il était avant l'entrée workshop
-  if (wsGraticuleWasVisible) graticule.setVisible(true);
-  if (wsFormationsWasVisible) formations.setVisible(true);
-
-  console.log('Exited workshop mode');
+  console.log('Exited Workshop');
 }
+
+// Expose enterWorkshopHub globally (for GuiControls button + formations overlay)
+(window as any).__enterWorkshopHub = enterWorkshopHub;
 
 // --- Render loop ---
 function animate(time: number) {
   requestAnimationFrame(animate);
 
   if (workshopMode) {
-    // Workshop render loop
     workshopScene?.render();
-    // Update scale bar with workshop camera (coordinates are in km)
     if (workshopScene) {
       const camDist = workshopScene.camera.position.distanceTo(workshopScene.controls.target);
       hud.updateScaleBarKm(workshopScene.camera, camDist);
