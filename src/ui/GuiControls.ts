@@ -279,6 +279,15 @@ export class GuiControls {
       adaptiveParams.stats = `${stats.tiles} tiles | ${(stats.triangles / 1000).toFixed(0)}K △`;
       this.statsDisplay?.updateDisplay();
     }, 500);
+
+    // ─── Workshop button ──────────────────────────────────────────
+    const wsParams = {
+      workshop: () => {
+        const fn = (window as any).__enterWorkshopHub;
+        if (fn) fn();
+      },
+    };
+    this.gui.add(wsParams, 'workshop').name('🔧 Workshop');
   }
 
   /** Called once features are loaded to populate the search dropdown */

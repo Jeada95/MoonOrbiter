@@ -71,12 +71,29 @@ function downsample(
  * Choose the best grid resolution for the requested region.
  * Use highest available resolution (2049) unless the region is so large
  * that the stitched grid would be enormous (>4 tiles per axis → use 1025).
+ *
+ * When maxOutputDim is small (e.g. 513), use lower source resolution
+ * to avoid loading large tiles that will be downsampled anyway.
  */
-function chooseResolution(latSpan: number, lonSpan: number): GridResolution {
+function chooseResolution(latSpan: number, lonSpan: number, maxOutputDim: number): GridResolution {
   const maxSpan = Math.max(latSpan, lonSpan);
   const tilesAcross = Math.ceil(maxSpan / TILE_DEG);
   // Highest available resolution
   const maxRes = GRID_RESOLUTIONS[GRID_RESOLUTIONS.length - 1];
+
+  // If the output will be capped to a small dimension, use the lowest resolution
+  // that still provides enough pixels for the output.
+  // Each tile has (res-1) useful pixels per 15° → total pixels = tilesAcross * (res-1)
+  // We want total pixels >= maxOutputDim.
+  if (maxOutputDim < MAX_GRID_DIM) {
+    const neededPerTile = Math.ceil(maxOutputDim / tilesAcross) + 1;
+    // Pick the smallest grid resolution that satisfies this
+    for (const res of GRID_RESOLUTIONS) {
+      if (res >= neededPerTile) return res as GridResolution;
+    }
+    return maxRes as GridResolution;
+  }
+
   if (tilesAcross > 4) {
     // Large region: stitching at 2049 would produce >8K samples — use 1025
     return (GRID_RESOLUTIONS.includes(1025 as any) ? 1025 : maxRes) as GridResolution;
@@ -97,6 +114,8 @@ function chooseResolution(latSpan: number, lonSpan: number): GridResolution {
  * @param lonMin Western bound (degrees, -180..180)
  * @param lonMax Eastern bound (degrees, -180..180)
  * @param onProgress Optional callback with a status message
+ * @param maxDim Maximum output grid dimension (defaults to MAX_GRID_DIM=2049).
+ *   Pass a smaller value (e.g. 513) for Full Moon Print to limit memory.
  */
 export async function extractLDEMRegion(
   latMin: number,
@@ -104,8 +123,10 @@ export async function extractLDEMRegion(
   lonMin: number,
   lonMax: number,
   onProgress?: (msg: string) => void,
+  maxDim?: number,
 ): Promise<LDEMExtractResult> {
   const log = onProgress || (() => {});
+  const effectiveMaxDim = maxDim ?? MAX_GRID_DIM;
 
   // Ensure latMin < latMax
   if (latMin > latMax) [latMin, latMax] = [latMax, latMin];
@@ -120,7 +141,7 @@ export async function extractLDEMRegion(
   const latSpan = latMax - latMin;
 
   // Choose grid resolution
-  const resolution = chooseResolution(latSpan, lonSpan);
+  const resolution = chooseResolution(latSpan, lonSpan, effectiveMaxDim);
   const ppd = (resolution - 1) / TILE_DEG; // effective pixels per degree
 
   // ─── Identify covering tiles ──────────────────────────────────
@@ -267,9 +288,9 @@ export async function extractLDEMRegion(
   let finalW = outCols;
   let finalH = outRows;
 
-  if (outCols > MAX_GRID_DIM || outRows > MAX_GRID_DIM) {
+  if (outCols > effectiveMaxDim || outRows > effectiveMaxDim) {
     log(`Sous-échantillonnage de ${outCols}×${outRows}...`);
-    const ds = downsample(rawData, outCols, outRows, MAX_GRID_DIM);
+    const ds = downsample(rawData, outCols, outRows, effectiveMaxDim);
     finalData = ds.data as Float32Array;
     finalW = ds.width;
     finalH = ds.height;

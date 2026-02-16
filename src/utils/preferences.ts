@@ -27,6 +27,13 @@ export interface UserPreferences {
   wsLightAzimuth: number;
   wsLightElevation: number;
   wsBaseThickness: number;
+  // Full Moon Print
+  fmpPieceCount: number;
+  fmpDiameterMM: number;
+  fmpShellThicknessMM: number;
+  fmpExaggeration: number;
+  fmpLightAzimuth: number;
+  fmpLightElevation: number;
   // Widget positions (null = default CSS position)
   hudPosition: WidgetPosition | null;
   scalebarPosition: WidgetPosition | null;
@@ -47,6 +54,12 @@ const DEFAULTS: UserPreferences = {
   wsLightAzimuth: 45,
   wsLightElevation: 30,
   wsBaseThickness: 0.5,
+  fmpPieceCount: 8,
+  fmpDiameterMM: 200,
+  fmpShellThicknessMM: 5,
+  fmpExaggeration: 5,
+  fmpLightAzimuth: 45,
+  fmpLightElevation: 30,
   hudPosition: null,
   scalebarPosition: null,
 };
