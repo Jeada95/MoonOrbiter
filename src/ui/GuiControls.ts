@@ -199,7 +199,7 @@ export class GuiControls {
 
     const photoFolder = this.gui.addFolder('Photo');
     photoFolder
-      .add(photoParams, 'normalIntensity', 0, 5, 0.1)
+      .add(photoParams, 'normalIntensity', 0, 10, 0.1)
       .name('Relief (normals)')
       .onChange((v: number) => { globe.setNormalScale(v); savePreferences({ normalIntensity: v }); });
     photoFolder.open();
