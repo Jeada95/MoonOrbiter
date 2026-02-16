@@ -6,7 +6,7 @@
  */
 
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TrackballControls } from 'three/addons/controls/TrackballControls.js';
 import type { BrickResult } from './BrickMeshBuilder';
 
 const DEG2RAD = Math.PI / 180;
@@ -17,7 +17,7 @@ const PIECE_COLORS = [0xb0b0b0, 0xd4a06a, 0x8ab4c8];
 export class WorkshopScene {
   readonly scene: THREE.Scene;
   readonly camera: THREE.PerspectiveCamera;
-  readonly controls: OrbitControls;
+  readonly controls: TrackballControls;
 
   private renderer: THREE.WebGLRenderer;
   private light: THREE.DirectionalLight;
@@ -49,10 +49,10 @@ export class WorkshopScene {
       10000,
     );
 
-    // Controls
-    this.controls = new OrbitControls(this.camera, renderer.domElement);
-    this.controls.enableDamping = true;
-    this.controls.dampingFactor = 0.1;
+    // Controls — TrackballControls for free rotation on all axes
+    this.controls = new TrackballControls(this.camera, renderer.domElement);
+    this.controls.staticMoving = false; // enable damping
+    this.controls.dynamicDampingFactor = 0.1;
     this.controls.enabled = false; // enabled only when workshop is active
 
     // Lighting
