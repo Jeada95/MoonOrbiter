@@ -263,8 +263,7 @@ let fmpPieceCount = prefs.fmpPieceCount as PieceCount;
 let fmpDiameterMM = prefs.fmpDiameterMM;
 let fmpShellThicknessMM = prefs.fmpShellThicknessMM;
 let fmpExaggeration = prefs.fmpExaggeration;
-let fmpLightAzimuth = prefs.fmpLightAzimuth;
-let fmpLightElevation = prefs.fmpLightElevation;
+// FMP light prefs no longer needed — headlight mode follows camera
 let fmpSegments: ShellSegmentResult[] = [];
 let fmpPieces: PieceBounds[] = [];
 
@@ -472,7 +471,10 @@ function cleanFeatureData(): void {
 
 /** Clean FMP data */
 function cleanFmpData(): void {
-  if (workshopScene) workshopScene.clearPieces();
+  if (workshopScene) {
+    workshopScene.clearPieces();
+    workshopScene.setHeadlightMode(false);
+  }
   for (const seg of fmpSegments) seg.geometry.dispose();
   fmpSegments = [];
   fmpPieces = [];
@@ -542,31 +544,22 @@ function createWorkshopHubGui(): WorkshopHubGui {
 
     // ─── Full Moon Print ───
     onEnterFullMoonPrint: () => enterFmpSubMode(),
-    onPieceCountChange: async (n) => {
+    onBuildFmp: () => fmpBuild(),
+    onPieceCountChange: (n) => {
       fmpPieceCount = n;
       savePreferences({ fmpPieceCount: n });
-      await fmpBuildAllPieces();
-      fmpShowAssembly();
-      workshopHubGui?.updatePieceList(n);
-      hideLoading();
     },
     onDiameterChange: (mm) => {
       fmpDiameterMM = mm;
       savePreferences({ fmpDiameterMM: mm });
     },
-    onShellThicknessChange: async (mm) => {
+    onShellThicknessChange: (mm) => {
       fmpShellThicknessMM = mm;
       savePreferences({ fmpShellThicknessMM: mm });
-      await fmpBuildAllPieces();
-      fmpShowAssembly();
-      hideLoading();
     },
-    onFmpExaggerationChange: async (exag) => {
+    onFmpExaggerationChange: (exag) => {
       fmpExaggeration = exag;
       savePreferences({ fmpExaggeration: exag });
-      await fmpBuildAllPieces();
-      fmpShowAssembly();
-      hideLoading();
     },
     onPreviewChange: (mode) => {
       if (mode === 'assembly') fmpShowAssembly();
@@ -595,28 +588,16 @@ function createWorkshopHubGui(): WorkshopHubGui {
       hideLoading();
     },
 
-    // ─── Shared ───
+    // ─── Shared (light controls only used in Feature Print — hidden in FMP) ───
     onLightAzimuthChange: (deg) => {
-      if (workshopSubMode === 'fmp') {
-        fmpLightAzimuth = deg;
-        savePreferences({ fmpLightAzimuth: deg });
-        workshopScene?.setLightDirection(deg, fmpLightElevation);
-      } else {
-        workshopLightAzimuth = deg;
-        savePreferences({ wsLightAzimuth: deg });
-        workshopScene?.setLightDirection(deg, workshopLightElevation);
-      }
+      workshopLightAzimuth = deg;
+      savePreferences({ wsLightAzimuth: deg });
+      workshopScene?.setLightDirection(deg, workshopLightElevation);
     },
     onLightElevationChange: (deg) => {
-      if (workshopSubMode === 'fmp') {
-        fmpLightElevation = deg;
-        savePreferences({ fmpLightElevation: deg });
-        workshopScene?.setLightDirection(fmpLightAzimuth, deg);
-      } else {
-        workshopLightElevation = deg;
-        savePreferences({ wsLightElevation: deg });
-        workshopScene?.setLightDirection(workshopLightAzimuth, deg);
-      }
+      workshopLightElevation = deg;
+      savePreferences({ wsLightElevation: deg });
+      workshopScene?.setLightDirection(workshopLightAzimuth, deg);
     },
     onWireframeChange: (enabled) => {
       workshopScene?.setWireframe(enabled);
@@ -701,30 +682,37 @@ async function enterFeaturePrint(featureName: string): Promise<void> {
   await featureExtractAndBuild(featureName);
 }
 
-/** Enter Full Moon Print sub-mode (from within workshop hub) */
-async function enterFmpSubMode(): Promise<void> {
+/** Enter Full Moon Print sub-mode (idle — no build until user clicks "Build pieces") */
+function enterFmpSubMode(): void {
   // Clean up previous sub-mode data
   cleanFeatureData();
   cleanFmpData();
 
   workshopSubMode = 'fmp';
 
-  // Update hub GUI
+  // Update hub GUI — opens FMP folder, hides Light folder
   workshopHubGui?.openFmpFolder();
 
   if (!workshopScene) {
     workshopScene = new WorkshopScene(moonScene.renderer);
   }
 
+  // Enable headlight mode: light follows camera so the sphere is always fully lit
+  workshopScene.setHeadlightMode(true);
+
+  console.log('Full Moon Print: ready — click "Build pieces" to generate');
+}
+
+/** Build FMP pieces (called from "Build pieces" button) */
+async function fmpBuild(): Promise<void> {
+  if (!workshopScene) return;
+
   try {
     await fmpBuildAllPieces();
     fmpShowAssembly();
-
-    workshopScene.setLightDirection(fmpLightAzimuth, fmpLightElevation);
     workshopHubGui?.updatePieceList(fmpPieceCount);
-
     hideLoading();
-    console.log(`Full Moon Print: ${fmpPieceCount} pieces ready`);
+    console.log(`Full Moon Print: ${fmpPieceCount} pieces built`);
   } catch (err) {
     hideLoading();
     console.error('Full Moon Print failed:', err);

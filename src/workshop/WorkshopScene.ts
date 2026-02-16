@@ -31,6 +31,9 @@ export class WorkshopScene {
   private pieceMeshes: THREE.Mesh[] = [];
   private pieceMaterials: THREE.MeshStandardMaterial[] = [];
 
+  /** When true, the directional light follows the camera each frame */
+  private headlightMode = false;
+
   constructor(renderer: THREE.WebGLRenderer) {
     this.renderer = renderer;
 
@@ -258,6 +261,11 @@ export class WorkshopScene {
     );
   }
 
+  /** Enable/disable headlight mode (light follows camera, for FMP) */
+  setHeadlightMode(enabled: boolean): void {
+    this.headlightMode = enabled;
+  }
+
   // ─── Wireframe ────────────────────────────────────────────────
 
   setWireframe(enabled: boolean): void {
@@ -278,6 +286,10 @@ export class WorkshopScene {
 
   render(): void {
     this.controls.update();
+    // In headlight mode, position light at camera so the visible face is always lit
+    if (this.headlightMode) {
+      this.light.position.copy(this.camera.position);
+    }
     this.renderer.render(this.scene, this.camera);
   }
 

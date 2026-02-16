@@ -32,6 +32,7 @@ export interface WorkshopHubCallbacks {
   onExportFeatureSTL: () => void;
   // Full Moon Print sub-mode
   onEnterFullMoonPrint: () => void;
+  onBuildFmp: () => void;
   onPieceCountChange: (n: PieceCount) => void;
   onDiameterChange: (mm: number) => void;
   onShellThicknessChange: (mm: number) => void;
@@ -70,6 +71,7 @@ export class WorkshopHubGui {
   // Sub-mode folders
   private featureFolder: GUI;
   private fmpFolder: GUI;
+  private lightFolder: GUI | null = null;
 
   // Feature Print widgets
   private sizeLabel: HTMLSpanElement | null = null;
@@ -172,6 +174,10 @@ export class WorkshopHubGui {
       .name('Exaggeration (×)')
       .onChange((v: number) => callbacks.onFmpExaggerationChange(v));
 
+    // Build button — triggers piece generation with current settings
+    const buildParams = { build: () => callbacks.onBuildFmp() };
+    this.fmpFolder.add(buildParams, 'build').name('🔨 Build pieces');
+
     // Preview dropdown (initially just assembly)
     const previewOptions: Record<string, string> = { 'Assembly (exploded)': 'assembly' };
     this.previewCtrl = this.fmpFolder
@@ -193,7 +199,8 @@ export class WorkshopHubGui {
     this.fmpFolder.add(fmpExportParams, 'exportAll').name('Export ALL STL');
 
     // ─── Shared controls ───────────────────────────────────────
-    const lightFolder = this.gui.addFolder('Light');
+    this.lightFolder = this.gui.addFolder('Light');
+    const lightFolder = this.lightFolder;
     const sharedParams = {
       azimuth: initial.azimuth,
       elevation: initial.elevation,
@@ -438,12 +445,16 @@ export class WorkshopHubGui {
     // Open Feature Print folder, close FMP folder
     this.featureFolder.open();
     this.fmpFolder.close();
+    // Show Light folder (feature mode uses directional light)
+    if (this.lightFolder) this.lightFolder.domElement.style.display = '';
   }
 
   /** Open the FMP folder (called when entering Full Moon Print sub-mode) */
   openFmpFolder(): void {
     this.fmpFolder.open();
     this.featureFolder.close();
+    // Hide Light folder (FMP uses headlight — light follows camera)
+    if (this.lightFolder) this.lightFolder.domElement.style.display = 'none';
   }
 
   /** Update the displayed zone size */
