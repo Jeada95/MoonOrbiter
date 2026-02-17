@@ -7,6 +7,6 @@ contextBridge.exposeInMainWorld('moonOrbiterElectron', {
   getDataFolderPath: (): Promise<string> => ipcRenderer.invoke('get-data-folder-path'),
   getVersion: (): Promise<string> => ipcRenderer.invoke('get-version'),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('open-external', url),
-  toggleFullscreen: (): Promise<void> => ipcRenderer.invoke('toggle-fullscreen'),
+  toggleFullscreen: (): Promise<boolean> => ipcRenderer.invoke('toggle-fullscreen'),
   quitApp: (): Promise<void> => ipcRenderer.invoke('quit-app'),
 });

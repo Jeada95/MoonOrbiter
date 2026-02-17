@@ -106,9 +106,14 @@ function registerMainIpcHandlers(): void {
     }
   });
 
-  // Fullscreen toggle
+  // Fullscreen toggle — returns new fullscreen state
   ipcMain.handle('toggle-fullscreen', () => {
-    if (mainWindow) mainWindow.setFullScreen(!mainWindow.isFullScreen());
+    if (mainWindow) {
+      const newState = !mainWindow.isFullScreen();
+      mainWindow.setFullScreen(newState);
+      return newState;
+    }
+    return false;
   });
 
   // Quit app
