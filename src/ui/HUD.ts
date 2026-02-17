@@ -187,13 +187,24 @@ export class HUD {
       this.mouseDirty = false;
 
       this.raycaster.setFromCamera(this.mouse, camera);
-      const intersects = this.raycaster.intersectObjects(raycastTargets, false);
 
-      if (intersects.length > 0) {
-        const point = intersects[0].point;
-        const r = point.length();
-        const lat = Math.asin(point.y / r) * (180 / Math.PI);
-        const lon = Math.atan2(-point.z, point.x) * (180 / Math.PI);
+      // Analytic ray-sphere intersection (works regardless of mesh visibility)
+      const origin = this.raycaster.ray.origin;
+      const dir = this.raycaster.ray.direction;
+      const oc = origin; // sphere centered at origin
+      const a = dir.dot(dir);
+      const b = 2 * oc.dot(dir);
+      const c = oc.dot(oc) - SPHERE_RADIUS * SPHERE_RADIUS;
+      const discriminant = b * b - 4 * a * c;
+
+      if (discriminant >= 0) {
+        const t = (-b - Math.sqrt(discriminant)) / (2 * a);
+        const px = origin.x + t * dir.x;
+        const py = origin.y + t * dir.y;
+        const pz = origin.z + t * dir.z;
+        const r = Math.sqrt(px * px + py * py + pz * pz);
+        const lat = Math.asin(py / r) * (180 / Math.PI);
+        const lon = Math.atan2(-pz, px) * (180 / Math.PI);
 
         const lonNorm = ((lon % 360) + 360) % 360;
         const lonDisplay = lonNorm > 180 ? lonNorm - 360 : lonNorm;

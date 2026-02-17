@@ -12,14 +12,18 @@ const DN_SCALE = 0.5;
  * Le format est détecté automatiquement par la taille du buffer.
  * Sources : LDEM 64ppd (résolutions 513, 1025) + LDEM 128ppd (résolution 2049).
  */
+/** Default cache budget: 256 MB */
+const DEFAULT_CACHE_BYTES = 256 * 1024 * 1024;
+
 export class LocalGridLoader {
   /** Cache LRU en mémoire — clé = "resolution/tileName" */
   private cache = new Map<string, HeightmapGrid>();
   private cacheOrder: string[] = [];
-  private maxCacheSize: number;
+  private maxCacheBytes: number;
+  private currentCacheBytes = 0;
 
-  constructor(maxCacheSize: number = 60) {
-    this.maxCacheSize = maxCacheSize;
+  constructor(maxCacheBytes: number = DEFAULT_CACHE_BYTES) {
+    this.maxCacheBytes = maxCacheBytes;
   }
 
   /**
@@ -34,6 +38,7 @@ export class LocalGridLoader {
     latMin: number,
     lonMin: number,
     resolution: GridResolution,
+    signal?: AbortSignal,
   ): Promise<HeightmapGrid> {
     const latMax = latMin + 15;
     const lonMax = lonMin + 15;
@@ -51,7 +56,7 @@ export class LocalGridLoader {
 
     // Fetch depuis le serveur local
     const url = `${getGridBasePath()}/${resolution}/${tileName}.bin`;
-    const response = await fetch(url);
+    const response = await fetch(url, signal ? { signal } : undefined);
     if (!response.ok) {
       throw new Error(`Erreur chargement grille ${url}: ${response.status}`);
     }
@@ -89,13 +94,19 @@ export class LocalGridLoader {
     };
 
     // Ajouter au cache LRU
+    const gridBytes = grid.data.byteLength;
     this.cache.set(cacheKey, grid);
     this.cacheOrder.push(cacheKey);
+    this.currentCacheBytes += gridBytes;
 
-    // Évicter si nécessaire
-    while (this.cacheOrder.length > this.maxCacheSize) {
+    // Évicter si le budget mémoire est dépassé
+    while (this.currentCacheBytes > this.maxCacheBytes && this.cacheOrder.length > 1) {
       const evicted = this.cacheOrder.shift()!;
-      this.cache.delete(evicted);
+      const evictedGrid = this.cache.get(evicted);
+      if (evictedGrid) {
+        this.currentCacheBytes -= evictedGrid.data.byteLength;
+        this.cache.delete(evicted);
+      }
     }
 
     return grid;
@@ -105,6 +116,7 @@ export class LocalGridLoader {
   clearCache(): void {
     this.cache.clear();
     this.cacheOrder = [];
+    this.currentCacheBytes = 0;
   }
 
   /** Nombre de grilles en cache */

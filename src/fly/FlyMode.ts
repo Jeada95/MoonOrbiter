@@ -87,6 +87,14 @@ export class FlyMode {
   /** Previous frame timestamp (ms) */
   private prevTime = 0;
 
+  // Pre-allocated Vector3 to avoid per-frame GC pressure
+  private _up = new THREE.Vector3();
+  private _north = new THREE.Vector3();
+  private _east = new THREE.Vector3();
+  private _horizontal = new THREE.Vector3();
+  private _forward = new THREE.Vector3();
+  private _target = new THREE.Vector3();
+
   // Bound handlers (for proper removal)
   private _onMouseDown: (e: MouseEvent) => void;
   private _onMouseUp: (e: MouseEvent) => void;
@@ -286,42 +294,29 @@ export class FlyMode {
 
     this.camera.position.set(px, py, pz);
 
-    // ─── Local tangent frame ─────────────────────────────
+    // ─── Local tangent frame (reuse pre-allocated vectors) ─────
     // Up = radial (outward from center)
-    const up = new THREE.Vector3(
-      cosLat * cosLon,
-      sinLat,
-      -cosLat * sinLon,
-    ).normalize();
+    const up = this._up.set(cosLat * cosLon, sinLat, -cosLat * sinLon).normalize();
 
     // North = d(position)/d(lat) normalized — points toward north pole
-    const north = new THREE.Vector3(
-      -sinLat * cosLon,
-      cosLat,
-      sinLat * sinLon,
-    ).normalize();
+    const north = this._north.set(-sinLat * cosLon, cosLat, sinLat * sinLon).normalize();
 
-    // East = Up × North (right-hand rule) — but we want East = cross(north, up)?
-    // Actually: East = d(position)/d(lon) normalized
-    const east = new THREE.Vector3(
-      -sinLon,
-      0,
-      -cosLon,
-    ).normalize();
+    // East = d(position)/d(lon) normalized
+    const east = this._east.set(-sinLon, 0, -cosLon).normalize();
 
     // ─── Apply yaw/pitch to get look direction ──────────
     // Horizontal direction = cos(yaw)*north + sin(yaw)*east
-    const horizontal = new THREE.Vector3()
+    const horizontal = this._horizontal
       .copy(north).multiplyScalar(Math.cos(this.yaw))
       .addScaledVector(east, Math.sin(this.yaw));
 
     // Forward = cos(pitch)*horizontal + sin(pitch)*up
-    const forward = new THREE.Vector3()
+    const forward = this._forward
       .copy(horizontal).multiplyScalar(Math.cos(this.pitch))
       .addScaledVector(up, Math.sin(this.pitch));
 
     // Look at target = position + forward
-    const target = new THREE.Vector3().copy(this.camera.position).add(forward);
+    const target = this._target.copy(this.camera.position).add(forward);
     this.camera.up.copy(up);
     this.camera.lookAt(target);
   }

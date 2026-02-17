@@ -156,6 +156,10 @@ export class AdaptiveMesher {
     const { gridSize, tileSize, errors } = martini;
     const max = tileSize;
 
+    // Adjust error threshold by exaggeration: a 100m terrain error appears
+    // as 500m visually when exaggeration=5, so we must subdivide more.
+    const effectiveMaxError = maxError / Math.max(exaggeration, 1);
+
     // --- Compter vertices et triangles ---
     const vertexIndices = new Uint32Array(gridSize * gridSize);
     vertexIndices.fill(0);
@@ -166,7 +170,7 @@ export class AdaptiveMesher {
       const mx = (ax + bx) >> 1;
       const my = (ay + by) >> 1;
 
-      if (Math.abs(ax - cx) + Math.abs(ay - cy) > 1 && errors[my * gridSize + mx] > maxError) {
+      if (Math.abs(ax - cx) + Math.abs(ay - cy) > 1 && errors[my * gridSize + mx] > effectiveMaxError) {
         countElements(cx, cy, ax, ay, mx, my);
         countElements(bx, by, cx, cy, mx, my);
       } else {
@@ -179,9 +183,27 @@ export class AdaptiveMesher {
     countElements(0, 0, max, max, max, 0);
     countElements(max, max, 0, 0, 0, max);
 
-    // --- Remplir positions, UVs, indices ---
+    // --- Compute positions & UVs once per vertex (not per triangle) ---
     const positions = new Float32Array(numVerts * 3);
     const uvs = new Float32Array(numVerts * 2);
+
+    // Scan vertexIndices to find used grid cells and compute their 3D positions + UVs
+    for (let row = 0; row < gridSize; row++) {
+      for (let col = 0; col < gridSize; col++) {
+        const vi = vertexIndices[row * gridSize + col];
+        if (vi === 0) continue; // not used
+        const idx = vi - 1;
+        const [px, py, pz] = gridToCartesian(col, row, grid, exaggeration);
+        positions[idx * 3] = px;
+        positions[idx * 3 + 1] = py;
+        positions[idx * 3 + 2] = pz;
+        const [u, v] = gridToUV(col, row, grid);
+        uvs[idx * 2] = u;
+        uvs[idx * 2 + 1] = v;
+      }
+    }
+
+    // --- Collect triangle indices ---
     const triIndices = new Uint32Array(numTris * 3);
     let triIdx = 0;
 
@@ -189,34 +211,13 @@ export class AdaptiveMesher {
       const mx = (ax + bx) >> 1;
       const my = (ay + by) >> 1;
 
-      if (Math.abs(ax - cx) + Math.abs(ay - cy) > 1 && errors[my * gridSize + mx] > maxError) {
+      if (Math.abs(ax - cx) + Math.abs(ay - cy) > 1 && errors[my * gridSize + mx] > effectiveMaxError) {
         emitTriangles(cx, cy, ax, ay, mx, my);
         emitTriangles(bx, by, cx, cy, mx, my);
       } else {
-        const a = vertexIndices[ay * gridSize + ax] - 1;
-        const b = vertexIndices[by * gridSize + bx] - 1;
-        const c = vertexIndices[cy * gridSize + cx] - 1;
-
-        const [pax, pay, paz] = gridToCartesian(ax, ay, grid, exaggeration);
-        positions[a * 3] = pax; positions[a * 3 + 1] = pay; positions[a * 3 + 2] = paz;
-
-        const [pbx, pby, pbz] = gridToCartesian(bx, by, grid, exaggeration);
-        positions[b * 3] = pbx; positions[b * 3 + 1] = pby; positions[b * 3 + 2] = pbz;
-
-        const [pcx, pcy, pcz] = gridToCartesian(cx, cy, grid, exaggeration);
-        positions[c * 3] = pcx; positions[c * 3 + 1] = pcy; positions[c * 3 + 2] = pcz;
-
-        const [ua, va] = gridToUV(ax, ay, grid);
-        uvs[a * 2] = ua; uvs[a * 2 + 1] = va;
-        const [ub, vb] = gridToUV(bx, by, grid);
-        uvs[b * 2] = ub; uvs[b * 2 + 1] = vb;
-        const [uc, vc] = gridToUV(cx, cy, grid);
-        uvs[c * 2] = uc; uvs[c * 2 + 1] = vc;
-
-        // Winding order (a, b, c) pour normales vers l'extérieur (avec z = -sin(lon))
-        triIndices[triIdx++] = a;
-        triIndices[triIdx++] = b;
-        triIndices[triIdx++] = c;
+        triIndices[triIdx++] = vertexIndices[ay * gridSize + ax] - 1;
+        triIndices[triIdx++] = vertexIndices[by * gridSize + bx] - 1;
+        triIndices[triIdx++] = vertexIndices[cy * gridSize + cx] - 1;
       }
     }
     emitTriangles(0, 0, max, max, max, 0);

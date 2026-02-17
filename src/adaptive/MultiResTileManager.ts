@@ -62,6 +62,8 @@ interface ManagedTile {
   /** Erreurs Martini pré-calculées (lourd, ne dépend que de la grille) */
   cachedMartini: MartiniErrors | null;
   loading: boolean;
+  /** AbortController to cancel obsolete fetch requests */
+  abortController: AbortController | null;
 }
 
 /**
@@ -75,7 +77,7 @@ interface ManagedTile {
  * priorisées par distance caméra (les plus proches d'abord).
  */
 export class MultiResTileManager {
-  private gridLoader = new LocalGridLoader(60);
+  private gridLoader = new LocalGridLoader(); // default: 256 MB budget
   private tiles: ManagedTile[] = [];
   private parent: THREE.Object3D;
   private frustum = new THREE.Frustum();
@@ -132,6 +134,7 @@ export class MultiResTileManager {
           cachedGridResolution: null,
           cachedMartini: null,
           loading: false,
+          abortController: null,
         });
       }
     }
@@ -165,7 +168,10 @@ export class MultiResTileManager {
     // --- Phase 1 : calculer distance + visibilité, cacher les tuiles hors frustum ---
     const visibleWork = this._visibleWork;
     visibleWork.length = 0;
-    const tileRadius = SPHERE_RADIUS * 0.15;
+    // Bounding sphere radius for a 15° tile: half-diagonal = R√2·sin(7.5°) ≈ 0.185R
+    // Add margin for vertical exaggeration (max elevation ~10km / MOON_RADIUS)
+    const tileRadius = SPHERE_RADIUS * Math.SQRT2 * Math.sin(7.5 * DEG2RAD)
+      + SPHERE_RADIUS * this.exaggeration * 0.006;
     const tmpSphere = this._tmpSphere;
     tmpSphere.radius = tileRadius;
 
@@ -228,12 +234,16 @@ export class MultiResTileManager {
     }
 
     // --- Phase 4 : traiter les rebuilds (limité, les plus proches d'abord) ---
+    // Time guard: stop rebuilding if we've already spent >12ms to keep 60fps
+    const rebuildStart = performance.now();
     let rebuildBudget = REBUILD_BUDGET_PER_FRAME;
     for (const work of visibleWork) {
       if (!work.needsRebuild) continue;
       if (rebuildBudget <= 0) break;
+      if (!work.tile.cachedGrid) continue; // defensive guard
+      if (performance.now() - rebuildStart > 12) break; // time guard for responsiveness
 
-      this.buildTileMesh(work.tile, work.tile.cachedGrid!, work.wantedError);
+      this.buildTileMesh(work.tile, work.tile.cachedGrid, work.wantedError);
       rebuildBudget--;
     }
 
@@ -252,19 +262,31 @@ export class MultiResTileManager {
   }
 
   private async loadTileGrid(tile: ManagedTile, resolution: GridResolution): Promise<void> {
+    // Cancel any previous in-flight load for this tile
+    if (tile.abortController) {
+      tile.abortController.abort();
+    }
+    const controller = new AbortController();
+    tile.abortController = controller;
     tile.loading = true;
     this.concurrentLoads++;
 
     try {
-      const grid = await this.gridLoader.loadGrid(tile.latMin, tile.lonMin, resolution);
+      const grid = await this.gridLoader.loadGrid(tile.latMin, tile.lonMin, resolution, controller.signal);
+      // Ignore result if this load was aborted (a newer one replaced it)
+      if (controller.signal.aborted) return;
       tile.cachedGrid = grid;
       tile.cachedGridResolution = resolution;
       tile.cachedMartini = null; // Sera calculé dans le rebuild budget
     } catch (err) {
+      if ((err as Error).name === 'AbortError') return; // expected cancellation
       console.warn(`Erreur chargement tuile ${tile.latMin},${tile.lonMin} @${resolution}:`, err);
     } finally {
       tile.loading = false;
       this.concurrentLoads--;
+      if (tile.abortController === controller) {
+        tile.abortController = null;
+      }
     }
   }
 

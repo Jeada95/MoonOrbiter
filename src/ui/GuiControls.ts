@@ -42,6 +42,7 @@ export class GuiControls {
   private searchWrapper: HTMLDivElement | null = null;
   private statsInterval = 0;
   private outsideClickHandler: ((e: MouseEvent) => void) | null = null;
+  private fullscreenChangeHandler: (() => void) | null = null;
 
   constructor(lighting: Lighting, globe: Globe, multiTile: MultiTileCallbacks, prefs: UserPreferences) {
     this.gui = new GUI({ title: 'MoonOrbiter' });
@@ -49,26 +50,24 @@ export class GuiControls {
     // --- Datetime picker (top-level, always visible) ---
     this.buildDateTimeWidget(this.gui, multiTile);
 
-    // --- Sun ---
-    const sunFolder = this.gui.addFolder('Sun');
-
+    // --- Sun intensity (top-level, no folder) ---
     const sunParams = {
       sunIntensity: prefs.sunIntensity,
     };
     lighting.sunLight.intensity = prefs.sunIntensity;
 
-    sunFolder
+    this.gui
       .add(sunParams, 'sunIntensity', 0, 5, 0.1)
-      .name('Intensity')
+      .name('Sun intensity')
       .onChange((v: number) => { lighting.sunLight.intensity = v; savePreferences({ sunIntensity: v }); });
 
-    sunFolder.open();
+    // --- Mode folder (Photo / Adaptive grouped together) ---
+    const modeFolder = this.gui.addFolder('Mode');
 
-    // --- Toggle Photo / Adaptive (two interlocked checkboxes on the same line) ---
     const isAdaptiveInit = prefs.mode === 'adaptive';
     const modeParams = { photo: !isAdaptiveInit, adaptive: isAdaptiveInit };
 
-    const photoCtrl = this.gui
+    const photoCtrl = modeFolder
       .add(modeParams, 'photo')
       .name('Photo')
       .onChange((v: boolean) => {
@@ -82,7 +81,7 @@ export class GuiControls {
         applyMode();
       });
 
-    const adaptiveCtrl = this.gui
+    const adaptiveCtrl = modeFolder
       .add(modeParams, 'adaptive')
       .name('Adaptive')
       .onChange((v: boolean) => {
@@ -114,97 +113,19 @@ export class GuiControls {
       modeWrapper.appendChild(adaptiveEl);
     }
 
-    const applyMode = () => {
-      const isAdaptive = modeParams.adaptive;
-      multiTile.onToggleAdaptive(isAdaptive);
-      savePreferences({ mode: isAdaptive ? 'adaptive' : 'photo' });
-      if (isAdaptive) {
-        photoFolder.hide();
-        adaptiveFolder.show();
-        adaptiveFolder.open();
-      } else {
-        adaptiveFolder.hide();
-        photoFolder.show();
-        photoFolder.open();
-      }
-    };
-
-    // --- Lat/lon grid checkbox ---
-    const overlayParams = { grille: prefs.graticule };
-    this.gui
-      .add(overlayParams, 'grille')
-      .name('Lat/lon grid')
-      .onChange((v: boolean) => { multiTile.onToggleGraticule(v); savePreferences({ graticule: v }); });
-
-    // --- Formations checkbox + 3 category sliders + wiki ---
-    const formationsParams = {
-      formations: prefs.formations,
-      maria: prefs.mariaCount,
-      craters: prefs.cratersCount,
-      other: prefs.otherCount,
-      wiki: prefs.wiki,
-    };
-
-    const subCtrls: ReturnType<GUI['add']>[] = [];
-
-    this.gui
-      .add(formationsParams, 'formations')
-      .name('Formations')
-      .onChange((v: boolean) => {
-        multiTile.onToggleFormations(v);
-        savePreferences({ formations: v });
-        for (const ctrl of subCtrls) v ? ctrl.show() : ctrl.hide();
-        if (this.searchWrapper) this.searchWrapper.style.display = v ? '' : 'none';
-      });
-
-    const mariaCtrl = this.gui
-      .add(formationsParams, 'maria', 1, 20, 1)
-      .name('Maria')
-      .onChange((v: number) => { multiTile.onMariaCountChange(v); savePreferences({ mariaCount: v }); });
-    if (!prefs.formations) mariaCtrl.hide();
-    subCtrls.push(mariaCtrl);
-
-    const cratersCtrl = this.gui
-      .add(formationsParams, 'craters', 1, 50, 1)
-      .name('Craters')
-      .onChange((v: number) => { multiTile.onCratersCountChange(v); savePreferences({ cratersCount: v }); });
-    if (!prefs.formations) cratersCtrl.hide();
-    subCtrls.push(cratersCtrl);
-
-    const otherCtrl = this.gui
-      .add(formationsParams, 'other', 1, 50, 1)
-      .name('Other')
-      .onChange((v: number) => { multiTile.onOtherCountChange(v); savePreferences({ otherCount: v }); });
-    if (!prefs.formations) otherCtrl.hide();
-    subCtrls.push(otherCtrl);
-
-    const wikiCtrl = this.gui
-      .add(formationsParams, 'wiki')
-      .name('Reactive names')
-      .onChange((v: boolean) => { multiTile.onToggleWiki(v); savePreferences({ wiki: v }); });
-    if (!prefs.formations) wikiCtrl.hide();
-    subCtrls.push(wikiCtrl);
-
-    // --- Search dropdown (custom DOM widget) ---
-    this.searchWrapper = this.buildSearchWidget(multiTile);
-    // Insert into the lil-gui children list (after wikiCtrl)
-    const guiChildren = this.gui.domElement.querySelector('.children') as HTMLElement;
-    if (guiChildren) guiChildren.appendChild(this.searchWrapper);
-    this.searchWrapper.style.display = prefs.formations ? '' : 'none';
-
-    // --- Photo folder ---
+    // --- Photo sub-folder (inside Mode) ---
     const photoParams = {
       normalIntensity: prefs.normalIntensity,
     };
 
-    const photoFolder = this.gui.addFolder('Photo');
+    const photoFolder = modeFolder.addFolder('Photo');
     photoFolder
       .add(photoParams, 'normalIntensity', 0, 10, 0.1)
       .name('Relief (normals)')
       .onChange((v: number) => { globe.setNormalScale(v); savePreferences({ normalIntensity: v }); });
     photoFolder.open();
 
-    // --- Adaptive folder ---
+    // --- Adaptive sub-folder (inside Mode) ---
     const adaptiveParams = {
       resolutionLevel: prefs.adaptiveResolution,
       exaggeration: prefs.adaptiveExaggeration,
@@ -212,7 +133,7 @@ export class GuiControls {
       stats: '0 tiles | 0 △',
     };
 
-    const adaptiveFolder = this.gui.addFolder('Adaptive');
+    const adaptiveFolder = modeFolder.addFolder('Adaptive');
 
     adaptiveFolder
       .add(adaptiveParams, 'resolutionLevel', 1, GRID_RESOLUTIONS.length, 1)
@@ -245,6 +166,21 @@ export class GuiControls {
       .name('Stats')
       .disable();
 
+    const applyMode = () => {
+      const isAdaptive = modeParams.adaptive;
+      multiTile.onToggleAdaptive(isAdaptive);
+      savePreferences({ mode: isAdaptive ? 'adaptive' : 'photo' });
+      if (isAdaptive) {
+        photoFolder.hide();
+        adaptiveFolder.show();
+        adaptiveFolder.open();
+      } else {
+        adaptiveFolder.hide();
+        photoFolder.show();
+        photoFolder.open();
+      }
+    };
+
     // Apply initial mode visibility
     if (isAdaptiveInit) {
       photoFolder.hide();
@@ -253,6 +189,75 @@ export class GuiControls {
     } else {
       adaptiveFolder.hide();
     }
+
+    modeFolder.open();
+
+    // --- Lat/lon grid checkbox ---
+    const overlayParams = { grille: prefs.graticule };
+    this.gui
+      .add(overlayParams, 'grille')
+      .name('Lat/lon grid')
+      .onChange((v: boolean) => { multiTile.onToggleGraticule(v); savePreferences({ graticule: v }); });
+
+    // --- Formations folder ---
+    const formationsFolder = this.gui.addFolder('Formations');
+
+    const formationsParams = {
+      formations: prefs.formations,
+      wiki: prefs.wiki,
+      maria: prefs.mariaCount,
+      craters: prefs.cratersCount,
+      other: prefs.otherCount,
+    };
+
+    const subCtrls: ReturnType<GUI['add']>[] = [];
+
+    formationsFolder
+      .add(formationsParams, 'formations')
+      .name('Formations')
+      .onChange((v: boolean) => {
+        multiTile.onToggleFormations(v);
+        savePreferences({ formations: v });
+        for (const ctrl of subCtrls) v ? ctrl.show() : ctrl.hide();
+        if (this.searchWrapper) this.searchWrapper.style.display = v ? '' : 'none';
+      });
+
+    // Reactive names — right below Formations toggle
+    const wikiCtrl = formationsFolder
+      .add(formationsParams, 'wiki')
+      .name('Reactive names')
+      .onChange((v: boolean) => { multiTile.onToggleWiki(v); savePreferences({ wiki: v }); });
+    if (!prefs.formations) wikiCtrl.hide();
+    subCtrls.push(wikiCtrl);
+
+    const mariaCtrl = formationsFolder
+      .add(formationsParams, 'maria', 1, 20, 1)
+      .name('Maria')
+      .onChange((v: number) => { multiTile.onMariaCountChange(v); savePreferences({ mariaCount: v }); });
+    if (!prefs.formations) mariaCtrl.hide();
+    subCtrls.push(mariaCtrl);
+
+    const cratersCtrl = formationsFolder
+      .add(formationsParams, 'craters', 1, 50, 1)
+      .name('Craters')
+      .onChange((v: number) => { multiTile.onCratersCountChange(v); savePreferences({ cratersCount: v }); });
+    if (!prefs.formations) cratersCtrl.hide();
+    subCtrls.push(cratersCtrl);
+
+    const otherCtrl = formationsFolder
+      .add(formationsParams, 'other', 1, 50, 1)
+      .name('Other')
+      .onChange((v: number) => { multiTile.onOtherCountChange(v); savePreferences({ otherCount: v }); });
+    if (!prefs.formations) otherCtrl.hide();
+    subCtrls.push(otherCtrl);
+
+    // --- Search dropdown (custom DOM widget, inside formations folder) ---
+    this.searchWrapper = this.buildSearchWidget(multiTile);
+    const folderChildren = formationsFolder.domElement.querySelector('.children') as HTMLElement;
+    if (folderChildren) folderChildren.appendChild(this.searchWrapper);
+    this.searchWrapper.style.display = prefs.formations ? '' : 'none';
+
+    formationsFolder.open();
 
     // Fire initial state so main.ts sets up correctly
     if (isAdaptiveInit) multiTile.onToggleAdaptive(true);
@@ -298,12 +303,19 @@ export class GuiControls {
     };
     this.gui.add(flyParams, 'flyMode').name('🛩 Fly Mode');
 
-    // ─── Fullscreen button ────────────────────────────────────────
+    // ─── Fullscreen button (dynamic label) ────────────────────────
+    const updateFullscreenLabel = (isFs: boolean) => {
+      fullscreenCtrl.name(isFs ? '⛶ Window mode' : '⛶ Fullscreen');
+    };
+
+    const electronApi = (window as any).moonOrbiterElectron;
+
     const fullscreenParams = {
       fullscreen: () => {
-        const api = (window as any).moonOrbiterElectron;
-        if (api?.toggleFullscreen) {
-          api.toggleFullscreen();
+        if (electronApi?.toggleFullscreen) {
+          electronApi.toggleFullscreen().then((isFs: boolean) => {
+            updateFullscreenLabel(isFs);
+          });
         } else if (document.fullscreenElement) {
           document.exitFullscreen();
         } else {
@@ -311,10 +323,17 @@ export class GuiControls {
         }
       },
     };
-    this.gui.add(fullscreenParams, 'fullscreen').name('⛶ Fullscreen');
+    const fullscreenCtrl = this.gui.add(fullscreenParams, 'fullscreen').name('⛶ Fullscreen');
+
+    // Web: listen for fullscreen changes to update label
+    if (!electronApi?.toggleFullscreen) {
+      this.fullscreenChangeHandler = () => {
+        updateFullscreenLabel(!!document.fullscreenElement);
+      };
+      document.addEventListener('fullscreenchange', this.fullscreenChangeHandler);
+    }
 
     // ─── Quit button (Electron only) ──────────────────────────────
-    const electronApi = (window as any).moonOrbiterElectron;
     if (electronApi?.quitApp) {
       const quitParams = { quit: () => electronApi.quitApp() };
       this.gui.add(quitParams, 'quit').name('✕ Quit');
@@ -549,6 +568,7 @@ export class GuiControls {
   dispose() {
     if (this.statsInterval) clearInterval(this.statsInterval);
     if (this.outsideClickHandler) document.removeEventListener('mousedown', this.outsideClickHandler);
+    if (this.fullscreenChangeHandler) document.removeEventListener('fullscreenchange', this.fullscreenChangeHandler);
     this.gui.destroy();
   }
 }
