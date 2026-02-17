@@ -8,6 +8,7 @@ import {
 } from '../utils/config';
 import type { GridResolution } from '../adaptive/LocalGridLoader';
 import { type UserPreferences, savePreferences } from '../utils/preferences';
+import { toggleAboutPanel } from './AboutPanel';
 
 /** Labels for each resolution level */
 const RES_LABELS: Record<number, string> = {
@@ -332,6 +333,10 @@ export class GuiControls {
       };
       document.addEventListener('fullscreenchange', this.fullscreenChangeHandler);
     }
+
+    // ─── About button ────────────────────────────────────────────
+    const aboutParams = { about: () => toggleAboutPanel() };
+    this.gui.add(aboutParams, 'about').name('ℹ About');
 
     // ─── Quit button (Electron only) ──────────────────────────────
     if (electronApi?.quitApp) {
