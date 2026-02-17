@@ -16,8 +16,6 @@ interface LunarFeature {
 
 interface FeatureMeta {
   category: Category;
-  linkEligible: boolean;
-  infoUrl: string;
 }
 
 /** Three display categories, each with its own slider, color and pool */
@@ -34,9 +32,6 @@ const EDGE_MARGIN = 40;
 const MARIA_TYPES = new Set(['Mare', 'Oceanus', 'Palus', 'Lacus', 'Sinus']);
 /** Feature types classified as Craters */
 const CRATER_TYPES = new Set(['Crater']);
-
-/** Minimum diameter (km) for info link eligibility */
-const LINK_MIN_DIAMETER = 1;
 
 /** Style per category: [color, font, textShadow, opacity, charWidth, halfHeight] */
 const CAT_STYLES: Record<Category, {
@@ -62,8 +57,18 @@ const CAT_STYLES: Record<Category, {
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
-function makeInfoUrl(feature: LunarFeature): string {
-  return `https://planetarynames.wr.usgs.gov/Feature/${feature.id}`;
+/** Wikipedia search with auto-redirect ("Go" mode).
+ *  If an article matches, the browser is redirected automatically.
+ *  Otherwise, search results are displayed. */
+function makeWikipediaSearchUrl(feature: LunarFeature): string {
+  const q = `${feature.name} ${feature.type}`;
+  return `https://en.wikipedia.org/w/index.php?search=${encodeURIComponent(q)}&go=Go`;
+}
+
+/** Google Images search for visual reference of the formation. */
+function makeGoogleImagesUrl(feature: LunarFeature): string {
+  const q = `${feature.name} moon ${feature.type}`;
+  return `https://www.google.com/search?q=${encodeURIComponent(q)}&udm=2`;
 }
 
 function classifyType(type: string): Category {
@@ -137,9 +142,10 @@ export class FormationsOverlay {
   private readonly _onReactiveClick = (e: MouseEvent) => {
     e.stopPropagation();
     const el = e.currentTarget as HTMLDivElement;
-    const featureName = el.dataset.featureName;
-    const infoUrl = el.dataset.infoUrl;
-    if (!featureName) return;
+    const idxStr = el.dataset.featureIndex;
+    if (idxStr === undefined) return;
+    const feature = this.allFeatures[Number(idxStr)];
+    if (!feature) return;
 
     // Remove any existing menu
     this._closeContextMenu();
@@ -164,36 +170,33 @@ export class FormationsOverlay {
     workshopItem.addEventListener('mouseleave', () => { workshopItem.style.background = ''; });
     workshopItem.addEventListener('click', () => {
       this._closeContextMenu();
-      if (this._onWorkshopRequest) this._onWorkshopRequest(featureName);
+      if (this._onWorkshopRequest) this._onWorkshopRequest(feature.name);
     });
     menu.appendChild(workshopItem);
 
-    // Option 2: Search web
-    const searchItem = document.createElement('div');
-    searchItem.style.cssText = itemStyle;
-    searchItem.innerHTML = '<span>🔍</span><span>Search web</span>';
-    searchItem.addEventListener('mouseenter', () => { searchItem.style.background = '#333'; });
-    searchItem.addEventListener('mouseleave', () => { searchItem.style.background = ''; });
-    searchItem.addEventListener('click', () => {
+    // Option 2: Wikipedia — search with auto-redirect
+    const wikiItem = document.createElement('div');
+    wikiItem.style.cssText = itemStyle;
+    wikiItem.innerHTML = '<span>📖</span><span>Wikipedia</span>';
+    wikiItem.addEventListener('mouseenter', () => { wikiItem.style.background = '#333'; });
+    wikiItem.addEventListener('mouseleave', () => { wikiItem.style.background = ''; });
+    wikiItem.addEventListener('click', () => {
       this._closeContextMenu();
-      const q = encodeURIComponent(`moon formation ${featureName}`);
-      openExternalUrl(`https://www.google.com/search?q=${q}`);
+      openExternalUrl(makeWikipediaSearchUrl(feature));
     });
-    menu.appendChild(searchItem);
+    menu.appendChild(wikiItem);
 
-    // Option 3: USGS Gazetteer (if eligible)
-    if (infoUrl) {
-      const usgsItem = document.createElement('div');
-      usgsItem.style.cssText = itemStyle;
-      usgsItem.innerHTML = '<span>📋</span><span>USGS Gazetteer</span>';
-      usgsItem.addEventListener('mouseenter', () => { usgsItem.style.background = '#333'; });
-      usgsItem.addEventListener('mouseleave', () => { usgsItem.style.background = ''; });
-      usgsItem.addEventListener('click', () => {
-        this._closeContextMenu();
-        openExternalUrl(infoUrl);
-      });
-      menu.appendChild(usgsItem);
-    }
+    // Option 3: Google Images — visual reference photos
+    const imagesItem = document.createElement('div');
+    imagesItem.style.cssText = itemStyle;
+    imagesItem.innerHTML = '<span>🖼</span><span>Images</span>';
+    imagesItem.addEventListener('mouseenter', () => { imagesItem.style.background = '#333'; });
+    imagesItem.addEventListener('mouseleave', () => { imagesItem.style.background = ''; });
+    imagesItem.addEventListener('click', () => {
+      this._closeContextMenu();
+      openExternalUrl(makeGoogleImagesUrl(feature));
+    });
+    menu.appendChild(imagesItem);
 
     document.body.appendChild(menu);
     this._contextMenu = menu;
@@ -265,11 +268,7 @@ export class FormationsOverlay {
       this.allWorldPositions.push(wp);
 
       const cat = classifyType(f.type);
-      this.allMeta.push({
-        category: cat,
-        linkEligible: f.diameter >= LINK_MIN_DIAMETER,
-        infoUrl: makeInfoUrl(f),
-      });
+      this.allMeta.push({ category: cat });
 
       catIndices[cat].push(i);
     }
@@ -439,21 +438,19 @@ export class FormationsOverlay {
     el.style.transform = 'translate(-50%,-50%)';
   }
 
-  private applyLink(el: HTMLDivElement, meta: FeatureMeta, featureName: string): void {
+  private applyLink(el: HTMLDivElement, featureIndex: number): void {
     if (this.linkMode) {
       el.style.textDecoration = 'underline';
       el.style.cursor = 'pointer';
       el.style.pointerEvents = 'auto';
-      el.dataset.featureName = featureName;
-      el.dataset.infoUrl = meta.linkEligible ? meta.infoUrl : '';
+      el.dataset.featureIndex = String(featureIndex);
       el.onclick = this._onReactiveClick;
     } else {
       el.style.textDecoration = 'none';
       el.style.cursor = '';
       el.style.pointerEvents = 'none';
       el.onclick = null;
-      delete el.dataset.featureName;
-      delete el.dataset.infoUrl;
+      delete el.dataset.featureIndex;
     }
   }
 
@@ -551,11 +548,11 @@ export class FormationsOverlay {
         if (cat.poolFeatureIndex[used] !== fi) {
           el.textContent = feature.name;
           this.applyLabel(el, c as Category);
-          this.applyLink(el, this.allMeta[fi], feature.name);
+          this.applyLink(el, fi);
           cat.poolFeatureIndex[used] = fi;
           cat.poolLinkState[used] = this.linkMode;
         } else if (cat.poolLinkState[used] !== this.linkMode) {
-          this.applyLink(el, this.allMeta[fi], feature.name);
+          this.applyLink(el, fi);
           cat.poolLinkState[used] = this.linkMode;
         }
 
