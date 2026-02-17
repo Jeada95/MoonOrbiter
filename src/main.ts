@@ -14,6 +14,10 @@ import { computeEarthViewPosition } from './astro/EarthView';
 import { Starfield } from './scene/Starfield';
 import { loadPreferences, savePreferences } from './utils/preferences';
 
+// Fly mode imports
+import { FlyMode } from './fly/FlyMode';
+import { FlyHUD } from './fly/FlyHUD';
+
 // Workshop mode imports
 import { extractLDEMRegion } from './workshop/LDEMRangeLoader';
 import { buildBrickGeometry, updateBrickExaggeration, type BrickResult } from './workshop/BrickMeshBuilder';
@@ -267,9 +271,17 @@ let fmpExaggeration = prefs.fmpExaggeration;
 let fmpSegments: ShellSegmentResult[] = [];
 let fmpPieces: PieceBounds[] = [];
 
+// --- Fly mode state ---
+let flyMode: FlyMode | null = null;
+let flyHud: FlyHUD | null = null;
+let flyPickMode = false; // true = waiting for user to click a start point
+let flyFormationsWasVisible = false;
+let flyGraticuleWasVisible = false;
+
 // DOM elements to hide/show
 const hudEl = document.getElementById('hud');
 const titleEl = document.getElementById('title');
+const scalebarEl = document.getElementById('scalebar');
 
 // Loading overlay
 const loadingOverlay = document.createElement('div');
@@ -744,12 +756,154 @@ function exitWorkshop(): void {
   console.log('Exited Workshop');
 }
 
+// ─── Fly mode entry/exit ──────────────────────────────────────
+
+/** Enter "pick start point" mode: user clicks on terrain to begin flying */
+function startFlyModePick(): void {
+  if (workshopMode || flyPickMode) return;
+  if (!adaptiveMode) {
+    alert('Fly Mode requires Adaptive mode. Please switch to Adaptive first.');
+    return;
+  }
+
+  flyPickMode = true;
+  document.body.style.cursor = 'crosshair';
+
+  const onClick = (e: MouseEvent) => {
+    // Raycast against the scene to find the click point on terrain
+    const rect = moonScene.renderer.domElement.getBoundingClientRect();
+    const mouse = new THREE.Vector2(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1,
+    );
+
+    // Analytic ray-sphere intersection (more reliable than mesh raycasting)
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(mouse, moonScene.camera);
+    const ray = raycaster.ray;
+
+    // Solve |origin + t*dir|² = R² → t² + 2t(origin·dir) + (|origin|²-R²) = 0
+    const oc = ray.origin;
+    const d = ray.direction;
+    const a = d.dot(d);
+    const b = 2 * oc.dot(d);
+    const c = oc.dot(oc) - SPHERE_RADIUS * SPHERE_RADIUS;
+    const discriminant = b * b - 4 * a * c;
+
+    if (discriminant < 0) {
+      // Missed the sphere
+      flyPickMode = false;
+      document.body.style.cursor = '';
+      moonScene.renderer.domElement.removeEventListener('click', onClick);
+      return;
+    }
+
+    const t = (-b - Math.sqrt(discriminant)) / (2 * a);
+    if (t < 0) {
+      flyPickMode = false;
+      document.body.style.cursor = '';
+      moonScene.renderer.domElement.removeEventListener('click', onClick);
+      return;
+    }
+
+    const hitPoint = new THREE.Vector3().copy(ray.origin).addScaledVector(ray.direction, t);
+
+    flyPickMode = false;
+    document.body.style.cursor = '';
+    moonScene.renderer.domElement.removeEventListener('click', onClick);
+
+    enterFlyMode(hitPoint);
+  };
+
+  moonScene.renderer.domElement.addEventListener('click', onClick);
+}
+
+/** Enter fly mode at the given start point on the sphere */
+function enterFlyMode(startPoint: THREE.Vector3): void {
+  // Hide GUI, HUD, scalebar, overlays, disable orbit controls
+  gui.hide();
+  if (hudEl) hudEl.style.display = 'none';
+  if (titleEl) titleEl.style.display = 'none';
+  if (scalebarEl) scalebarEl.style.display = 'none';
+  flyFormationsWasVisible = formations.isVisible();
+  flyGraticuleWasVisible = graticule.isVisible();
+  formations.setVisible(false);
+  graticule.setVisible(false);
+  moonScene.controls.enabled = false;
+
+  // Create fly mode controller (pass current adaptive exaggeration)
+  flyMode = new FlyMode(
+    moonScene.camera,
+    moonScene.renderer.domElement,
+    globe,
+    tileManager.exaggeration,
+    {
+      onExit: () => exitFlyMode(),
+    },
+  );
+
+  // Create fly HUD
+  flyHud = new FlyHUD();
+
+  // Activate
+  flyMode.activate(startPoint);
+}
+
+/** Exit fly mode and restore normal controls */
+function exitFlyMode(): void {
+  if (flyMode) {
+    flyMode.deactivate();
+    flyMode = null;
+  }
+  if (flyHud) {
+    flyHud.dispose();
+    flyHud = null;
+  }
+
+  // Restore camera to a reasonable distance looking at the last position
+  const camPos = moonScene.camera.position.clone();
+  const dir = camPos.normalize();
+  moonScene.camera.position.copy(dir.multiplyScalar(SPHERE_RADIUS * 2));
+  moonScene.controls.target.set(0, 0, 0);
+  moonScene.controls.enabled = true;
+
+  // Restore UI
+  gui.show();
+  if (hudEl) hudEl.style.display = '';
+  if (titleEl) titleEl.style.display = '';
+  if (scalebarEl) scalebarEl.style.display = '';
+  if (flyFormationsWasVisible) formations.setVisible(true);
+  if (flyGraticuleWasVisible) graticule.setVisible(true);
+}
+
+// Expose fly mode globally (for GuiControls button)
+(window as any).__startFlyMode = startFlyModePick;
+
 // Expose enterWorkshopHub globally (for GuiControls button + formations overlay)
 (window as any).__enterWorkshopHub = enterWorkshopHub;
 
 // --- Render loop ---
 function animate(time: number) {
   requestAnimationFrame(animate);
+
+  // ─── Fly mode ────────────────────────────────────────────
+  if (flyMode && flyMode.isActive()) {
+    flyMode.update();
+
+    // Update adaptive tiles around the camera's current position
+    if (adaptiveMode) {
+      tileManager.update(moonScene.camera);
+    }
+
+    // Update fly HUD
+    if (flyHud) {
+      flyHud.update(flyMode.getInfo());
+    }
+
+    // Render the main scene (globe + tiles + starfield)
+    moonScene.renderer.render(moonScene.scene, moonScene.camera);
+    return;
+  }
 
   if (workshopMode) {
     workshopScene?.render();

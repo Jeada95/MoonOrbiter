@@ -288,6 +288,37 @@ export class GuiControls {
       },
     };
     this.gui.add(wsParams, 'workshop').name('🔧 Workshop');
+
+    // ─── Fly Mode button ─────────────────────────────────────────
+    const flyParams = {
+      flyMode: () => {
+        const fn = (window as any).__startFlyMode;
+        if (fn) fn();
+      },
+    };
+    this.gui.add(flyParams, 'flyMode').name('🛩 Fly Mode');
+
+    // ─── Fullscreen button ────────────────────────────────────────
+    const fullscreenParams = {
+      fullscreen: () => {
+        const api = (window as any).moonOrbiterElectron;
+        if (api?.toggleFullscreen) {
+          api.toggleFullscreen();
+        } else if (document.fullscreenElement) {
+          document.exitFullscreen();
+        } else {
+          document.documentElement.requestFullscreen();
+        }
+      },
+    };
+    this.gui.add(fullscreenParams, 'fullscreen').name('⛶ Fullscreen');
+
+    // ─── Quit button (Electron only) ──────────────────────────────
+    const electronApi = (window as any).moonOrbiterElectron;
+    if (electronApi?.quitApp) {
+      const quitParams = { quit: () => electronApi.quitApp() };
+      this.gui.add(quitParams, 'quit').name('✕ Quit');
+    }
   }
 
   /** Called once features are loaded to populate the search dropdown */

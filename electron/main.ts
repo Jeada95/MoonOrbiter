@@ -105,6 +105,16 @@ function registerMainIpcHandlers(): void {
       shell.openExternal(url);
     }
   });
+
+  // Fullscreen toggle
+  ipcMain.handle('toggle-fullscreen', () => {
+    if (mainWindow) mainWindow.setFullScreen(!mainWindow.isFullScreen());
+  });
+
+  // Quit app
+  ipcMain.handle('quit-app', () => {
+    app.quit();
+  });
 }
 
 async function createMainWindow(): Promise<void> {

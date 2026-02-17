@@ -225,6 +225,21 @@ export class Globe {
     return this.material.wireframe;
   }
 
+  /**
+   * Retourne l'élévation (en mètres) à une position lat/lon donnée.
+   * Utilisé par le FlyMode pour maintenir l'altitude au-dessus du terrain.
+   * @param latDeg Latitude en degrés (-90..+90)
+   * @param lonDeg Longitude en degrés (-180..+180 ou 0..360)
+   * @returns Élévation en mètres, ou 0 si les données ne sont pas chargées.
+   */
+  getElevationAtLatLon(latDeg: number, lonDeg: number): number {
+    if (!this.elevationData) return 0;
+    const lon360 = ((lonDeg % 360) + 360) % 360;
+    const rowF = ((90 - latDeg) / 180) * (this.elevHeight - 1);
+    const colF = (lon360 / 360) * (this.elevWidth - 1);
+    return this.sampleElevation(rowF, colF);
+  }
+
   setVisible(visible: boolean) {
     this.mesh.visible = visible;
   }
