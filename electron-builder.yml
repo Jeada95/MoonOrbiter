@@ -1,6 +1,6 @@
 appId: com.moonorbiter.app
 productName: MoonOrbiter
-copyright: Copyright (c) 2026
+copyright: Copyright (c) 2025
 
 directories:
   output: release
@@ -16,16 +16,13 @@ files:
   - "!**/*.ts"
   - "!**/*.map"
 
-extraResources:
-  - from: node_modules/laz-perf/lib/web/laz-perf.wasm
-    to: wasm/laz-perf.wasm
-
 win:
   target:
     - target: nsis
       arch:
         - x64
   icon: assets/icon.ico
+  sign: false
 
 nsis:
   oneClick: false
