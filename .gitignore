@@ -2,6 +2,14 @@ node_modules/
 dist/
 dist-electron/
 release/
+
+# OS
 nul
+Thumbs.db
+.DS_Store
+
+# AI / local dev
 .claude/
 *.ps1
+PLAN.md
+codex-output.txt
