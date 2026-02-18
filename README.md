@@ -86,6 +86,10 @@ All lunar data comes from NASA's Lunar Reconnaissance Orbiter (LRO) mission:
 - **Imagery**: [LRO WAC Global Mosaic](https://wms.lroc.asu.edu/lroc/view_rdr/WAC_GLOBAL)
 - **Formations**: [IAU Gazetteer of Planetary Nomenclature](https://planetarynames.wr.usgs.gov/)
 
+## Acknowledgements
+
+Built with the help of AI assistants (Claude by Anthropic, Codex by OpenAI).
+
 ## License
 
 MIT
