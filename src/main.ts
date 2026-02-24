@@ -41,18 +41,34 @@ globe.addToScene(moonScene.scene);
 
 // --- Resolve data base URL (Electron or Vite dev) ---
 await initDataBaseUrl();
+console.log('[init] Data base URL:', getDataUrl('/moon-data/'));
+
+// --- Error overlay for critical load failures ---
+function showLoadError(resource: string, err: unknown): void {
+  console.error(`[LOAD ERROR] ${resource}:`, err);
+  const existing = document.getElementById('load-error-overlay');
+  if (existing) {
+    existing.innerHTML += `<br>${resource}: ${err}`;
+    return;
+  }
+  const overlay = document.createElement('div');
+  overlay.id = 'load-error-overlay';
+  overlay.style.cssText =
+    'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:9999;' +
+    'background:rgba(180,30,30,0.9);color:#fff;padding:12px 20px;border-radius:8px;' +
+    'font:13px "Segoe UI",sans-serif;max-width:600px;text-align:center;' +
+    'pointer-events:none;';
+  overlay.textContent = `Failed to load: ${resource}`;
+  document.body.appendChild(overlay);
+}
 
 // --- Load data ---
 const textureLoader = new THREE.TextureLoader();
-
-// Shared LROC texture between Globe and TileManager
-let lrocTexture: THREE.Texture | null = null;
 
 // 1) LROC color texture
 textureLoader.load(
   getDataUrl('/moon-data/moon_texture_4k.jpg'),
   (texture) => {
-    lrocTexture = texture;
     globe.setTexture(texture);
     tileManager.setTexture(texture);
     console.log('LROC 4K texture loaded');
@@ -63,13 +79,12 @@ textureLoader.load(
     textureLoader.load(
       getDataUrl('/moon-data/moon_texture_2k.jpg'),
       (texture) => {
-        lrocTexture = texture;
         globe.setTexture(texture);
         tileManager.setTexture(texture);
         console.log('LROC 2K texture loaded');
       },
       undefined,
-      (err2) => console.error('Failed to load texture', err2)
+      (err2) => showLoadError('Moon texture (4K+2K both failed)', err2)
     );
   }
 );
@@ -90,7 +105,7 @@ textureLoader.load(
         tileManager.setNormalMap(normalTexture, prefs.normalIntensity);
       },
       undefined,
-      () => {}
+      (err) => console.warn('[load] Normal map failed (16ppd+4ppd both failed):', err)
     );
   }
 );
@@ -98,7 +113,7 @@ textureLoader.load(
 // 3) Elevation data — LOLA 4ppd (Float32, already in meters, 4 MB)
 globe.loadElevationBin(getDataUrl('/moon-data/lola_elevation_4ppd.bin'), 1440, 720)
   .then(() => console.log('LOLA 4ppd elevation applied'))
-  .catch((err) => console.error('Elevation loading error:', err));
+  .catch((err) => showLoadError('Elevation data (lola_elevation_4ppd.bin)', err));
 
 // --- Multi-resolution adaptive tiling ---
 const tileManager = new MultiResTileManager(moonScene.scene);
@@ -377,16 +392,19 @@ async function featureExtractAndBuild(featureName: string): Promise<void> {
 
 // ─── FMP helpers ──────────────────────────────────────────────
 
+/** MM-per-km scale factor for the current FMP diameter */
+function fmpScaleMM(): number {
+  return fmpDiameterMM / (2 * MOON_RADIUS_KM);
+}
+
 /** Compute shell thickness in km from mm parameters */
 function fmpShellThicknessKm(): number {
-  const scaleMM = fmpDiameterMM / (2 * MOON_RADIUS_KM);
-  return fmpShellThicknessMM / scaleMM;
+  return fmpShellThicknessMM / fmpScaleMM();
 }
 
 /** Compute lip depth in km from a 0.4mm lip at current scale */
 function fmpLipDepthKm(): number {
-  const scaleMM = fmpDiameterMM / (2 * MOON_RADIUS_KM);
-  return 0.4 / scaleMM;
+  return 0.4 / fmpScaleMM();
 }
 
 /** Build all pieces for the current FMP configuration */
@@ -440,19 +458,7 @@ function fmpShowAssembly(): void {
 function fmpShowPiece(index: number): void {
   if (!workshopScene || index >= fmpSegments.length) return;
   const seg = fmpSegments[index];
-  const piece = seg.piece;
-
-  const midLat = (piece.latMin + piece.latMax) / 2;
-  const midLon = (piece.lonMin + piece.lonMax) / 2;
-  const latRad = midLat * Math.PI / 180;
-  const lonRad = midLon * Math.PI / 180;
-  const dir = new THREE.Vector3(
-    Math.cos(latRad) * Math.cos(lonRad),
-    Math.sin(latRad),
-    -Math.cos(latRad) * Math.sin(lonRad),
-  );
-
-  workshopScene.showSinglePiece(seg.geometry, dir);
+  workshopScene.showSinglePiece(seg.geometry, fmpPieceCenterDir(seg.piece));
 }
 
 /** Compute piece center direction for export rotation */
@@ -580,14 +586,14 @@ function createWorkshopHubGui(): WorkshopHubGui {
     onExportPiece: (index) => {
       if (index >= fmpSegments.length) return;
       const seg = fmpSegments[index];
-      const scaleMM = fmpDiameterMM / (2 * MOON_RADIUS_KM);
+      const scaleMM = fmpScaleMM();
       const dir = fmpPieceCenterDir(seg.piece);
       const q = new THREE.Quaternion().setFromUnitVectors(dir.normalize(), new THREE.Vector3(0, 1, 0));
       const filename = makePieceSTLFilename(seg.piece.band, seg.piece.sector, fmpExaggeration, fmpDiameterMM);
       exportScaledMeshAsSTL(seg.geometry, scaleMM, q, filename);
     },
     onExportAll: async () => {
-      const scaleMM = fmpDiameterMM / (2 * MOON_RADIUS_KM);
+      const scaleMM = fmpScaleMM();
       for (let i = 0; i < fmpSegments.length; i++) {
         showLoading(`Exporting piece ${i + 1}/${fmpSegments.length}...`);
         const seg = fmpSegments[i];

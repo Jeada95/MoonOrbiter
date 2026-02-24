@@ -146,6 +146,13 @@ async function createMainWindow(): Promise<void> {
   mainWindow.maximize();
   mainWindow.once('ready-to-show', () => mainWindow!.show());
 
+  // Ctrl+Shift+D toggles DevTools (works in production too)
+  mainWindow.webContents.on('before-input-event', (_event, input) => {
+    if (input.control && input.shift && input.key.toLowerCase() === 'd') {
+      mainWindow?.webContents.toggleDevTools();
+    }
+  });
+
   // Register IPC handlers (only once — they persist for the app lifetime)
   registerMainIpcHandlers();
 
