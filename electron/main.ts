@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import * as path from 'path';
 import { loadConfig, saveConfig, validateDataFolder, detectAvailableGrids, AppConfig } from './config-store';
 import { startDataServer, DataServer } from './data-server';
+import { getDataPackStatuses, downloadDataPack } from './data-downloader';
 
 // Ensure consistent userData path in dev and production
 app.setName('moon-orbiter');
@@ -119,6 +120,25 @@ function registerMainIpcHandlers(): void {
   // Quit app
   ipcMain.handle('quit-app', () => {
     app.quit();
+  });
+
+  // ─── Data Manager IPC ──────────────────────────────────────────
+  ipcMain.handle('get-data-pack-statuses', () => {
+    if (!config) return [];
+    return getDataPackStatuses(config.dataFolder);
+  });
+
+  ipcMain.handle('download-data-pack', async (_event, packId: string) => {
+    if (!config) throw new Error('No data folder configured');
+    const grids = await downloadDataPack(packId, config.dataFolder, mainWindow);
+    availableGrids = grids;
+    return grids;
+  });
+
+  ipcMain.handle('refresh-available-grids', () => {
+    if (!config) return [];
+    availableGrids = detectAvailableGrids(config.dataFolder);
+    return availableGrids;
   });
 }
 

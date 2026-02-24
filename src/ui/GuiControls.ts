@@ -9,6 +9,7 @@ import {
 import type { GridResolution } from '../adaptive/LocalGridLoader';
 import { type UserPreferences, savePreferences } from '../utils/preferences';
 import { toggleAboutPanel } from './AboutPanel';
+import { toggleDataManagerPanel } from './DataManagerPanel';
 
 /** Labels for each resolution level */
 const RES_LABELS: Record<number, string> = {
@@ -337,6 +338,12 @@ export class GuiControls {
     // ─── About button ────────────────────────────────────────────
     const aboutParams = { about: () => toggleAboutPanel() };
     this.gui.add(aboutParams, 'about').name('ℹ About');
+
+    // ─── Data Manager button (Electron only) ─────────────────────
+    if (electronApi?.isElectron) {
+      const dmParams = { dataManager: () => toggleDataManagerPanel() };
+      this.gui.add(dmParams, 'dataManager').name('📦 Data Manager');
+    }
 
     // ─── Quit button (Electron only) ──────────────────────────────
     if (electronApi?.quitApp) {

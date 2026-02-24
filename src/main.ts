@@ -8,7 +8,7 @@ import { MultiResTileManager } from './adaptive/MultiResTileManager';
 import { GraticuleOverlay } from './overlays/GraticuleOverlay';
 import { FormationsOverlay } from './overlays/FormationsOverlay';
 import { SPHERE_RADIUS } from './utils/config';
-import { initDataBaseUrl, getDataUrl } from './utils/data-paths';
+import { initDataBaseUrl, getDataUrl, initAvailableGrids } from './utils/data-paths';
 import { computeSunPosition, SunInfo } from './astro/SunPosition';
 import { computeEarthViewPosition } from './astro/EarthView';
 import { Starfield } from './scene/Starfield';
@@ -41,7 +41,92 @@ globe.addToScene(moonScene.scene);
 
 // --- Resolve data base URL (Electron or Vite dev) ---
 await initDataBaseUrl();
+await initAvailableGrids();
 console.log('[init] Data base URL:', getDataUrl('/moon-data/'));
+
+// --- "Data missing" overlay for Workshop errors ---
+function showDataMissingOverlay(): void {
+  // Remove any previous instance
+  const existing = document.getElementById('data-missing-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'data-missing-overlay';
+  overlay.style.cssText =
+    'position:fixed;inset:0;z-index:10001;' +
+    'display:flex;align-items:center;justify-content:center;' +
+    'background:rgba(0,0,0,0.7);';
+
+  const panel = document.createElement('div');
+  panel.style.cssText =
+    'background:rgba(15,15,25,0.95);' +
+    'backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);' +
+    'border:1px solid rgba(255,255,255,0.12);border-radius:12px;' +
+    'padding:28px 32px;max-width:440px;width:90%;' +
+    'color:#ddd;font-family:"Segoe UI",sans-serif;text-align:center;' +
+    'box-shadow:0 8px 32px rgba(0,0,0,0.5);';
+
+  const icon = document.createElement('div');
+  icon.textContent = '📦';
+  icon.style.cssText = 'font-size:40px;margin-bottom:12px;';
+
+  const title = document.createElement('h3');
+  title.textContent = 'Grid Data Required';
+  title.style.cssText = 'margin:0 0 12px 0;font-size:18px;color:#fff;';
+
+  const msg = document.createElement('p');
+  msg.style.cssText = 'font-size:13px;line-height:1.6;color:#bbb;margin:0 0 20px 0;';
+  msg.textContent =
+    'The Workshop requires terrain grid data that is not currently installed. ' +
+    'Use the Data Manager to download the required data packs.';
+
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;gap:10px;justify-content:center;';
+
+  // Data Manager button (Electron only)
+  const electronApi = (window as any).moonOrbiterElectron;
+  if (electronApi?.isElectron) {
+    const dmBtn = document.createElement('button');
+    dmBtn.textContent = '📦 Open Data Manager';
+    dmBtn.style.cssText =
+      'padding:8px 20px;background:#2563eb;color:#fff;border:none;border-radius:6px;' +
+      'font:13px "Segoe UI",sans-serif;cursor:pointer;transition:background 0.2s;';
+    dmBtn.addEventListener('mouseenter', () => { dmBtn.style.background = '#1d4ed8'; });
+    dmBtn.addEventListener('mouseleave', () => { dmBtn.style.background = '#2563eb'; });
+    dmBtn.addEventListener('click', () => {
+      overlay.remove();
+      // Import and open Data Manager dynamically
+      import('./ui/DataManagerPanel').then(m => m.toggleDataManagerPanel());
+    });
+    btnRow.appendChild(dmBtn);
+  }
+
+  const closeBtn = document.createElement('button');
+  closeBtn.textContent = 'Close';
+  closeBtn.style.cssText =
+    'padding:8px 20px;background:#333;color:#ccc;border:1px solid #555;border-radius:6px;' +
+    'font:13px "Segoe UI",sans-serif;cursor:pointer;transition:background 0.2s;';
+  closeBtn.addEventListener('mouseenter', () => { closeBtn.style.background = '#444'; });
+  closeBtn.addEventListener('mouseleave', () => { closeBtn.style.background = '#333'; });
+  closeBtn.addEventListener('click', () => overlay.remove());
+  btnRow.appendChild(closeBtn);
+
+  panel.appendChild(icon);
+  panel.appendChild(title);
+  panel.appendChild(msg);
+  panel.appendChild(btnRow);
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+
+  // Escape to close
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+    }
+  };
+  document.addEventListener('keydown', onKey);
+}
 
 // --- Error overlay for critical load failures ---
 function showLoadError(resource: string, err: unknown): void {
@@ -386,7 +471,12 @@ async function featureExtractAndBuild(featureName: string): Promise<void> {
   } catch (err) {
     hideLoading();
     console.error('Feature extraction failed:', err);
-    alert(`Failed to extract terrain: ${(err as Error).message}`);
+    const msg = (err as Error).message || '';
+    if (msg.includes('NO_GRID_DATA')) {
+      showDataMissingOverlay();
+    } else {
+      alert(`Failed to extract terrain: ${msg}`);
+    }
   }
 }
 
@@ -734,7 +824,12 @@ async function fmpBuild(): Promise<void> {
   } catch (err) {
     hideLoading();
     console.error('Full Moon Print failed:', err);
-    alert(`Full Moon Print failed: ${(err as Error).message}`);
+    const msg = (err as Error).message || '';
+    if (msg.includes('NO_GRID_DATA')) {
+      showDataMissingOverlay();
+    } else {
+      alert(`Full Moon Print failed: ${msg}`);
+    }
   }
 }
 

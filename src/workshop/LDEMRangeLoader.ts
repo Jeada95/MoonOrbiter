@@ -12,6 +12,7 @@
 
 import { LocalGridLoader, type GridResolution } from '../adaptive/LocalGridLoader';
 import { GRID_RESOLUTIONS } from '../utils/config';
+import { getAvailableGrids } from '../utils/data-paths';
 
 // ─── Constants ──────────────────────────────────────────────────
 const TILE_DEG = 15;
@@ -68,35 +69,40 @@ function downsample(
 }
 
 /**
- * Choose the best grid resolution for the requested region.
- * Use highest available resolution (2049) unless the region is so large
- * that the stitched grid would be enormous (>4 tiles per axis → use 1025).
+ * Choose the best grid resolution for the requested region,
+ * constrained to resolutions that are actually installed on disk.
  *
- * When maxOutputDim is small (e.g. 513), use lower source resolution
- * to avoid loading large tiles that will be downsampled anyway.
+ * Throws a descriptive error if no grids are installed at all.
  */
 function chooseResolution(latSpan: number, lonSpan: number, maxOutputDim: number): GridResolution {
+  // Filter GRID_RESOLUTIONS by what's actually installed
+  const installed = getAvailableGrids();
+  const available = GRID_RESOLUTIONS.filter(r => installed.includes(r));
+
+  if (available.length === 0) {
+    throw new Error(
+      'NO_GRID_DATA: No grid data installed. ' +
+      'Download data packs via the Data Manager (📦 button in the menu).'
+    );
+  }
+
   const maxSpan = Math.max(latSpan, lonSpan);
   const tilesAcross = Math.ceil(maxSpan / TILE_DEG);
-  // Highest available resolution
-  const maxRes = GRID_RESOLUTIONS[GRID_RESOLUTIONS.length - 1];
+  const maxRes = available[available.length - 1];
 
   // If the output will be capped to a small dimension, use the lowest resolution
   // that still provides enough pixels for the output.
-  // Each tile has (res-1) useful pixels per 15° → total pixels = tilesAcross * (res-1)
-  // We want total pixels >= maxOutputDim.
   if (maxOutputDim < MAX_GRID_DIM) {
     const neededPerTile = Math.ceil(maxOutputDim / tilesAcross) + 1;
-    // Pick the smallest grid resolution that satisfies this
-    for (const res of GRID_RESOLUTIONS) {
+    for (const res of available) {
       if (res >= neededPerTile) return res as GridResolution;
     }
     return maxRes as GridResolution;
   }
 
   if (tilesAcross > 4) {
-    // Large region: stitching at 2049 would produce >8K samples — use 1025
-    return (GRID_RESOLUTIONS.includes(1025 as any) ? 1025 : maxRes) as GridResolution;
+    // Large region: prefer 1025 if available
+    return (available.includes(1025) ? 1025 : maxRes) as GridResolution;
   }
   return maxRes as GridResolution;
 }
